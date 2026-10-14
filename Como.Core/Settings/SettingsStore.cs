@@ -21,6 +21,9 @@ public sealed class SettingsException(string message) : Exception(message);
 /// Formato: "COM1" | salt(16) | nonce(12) | tag(16) | ciphertext (AES-256-GCM, JSON UTF-8).
 /// La clave se deriva con SHA-256 de (salt aleatorio del archivo + usuario + carpeta personal),
 /// por lo que no hay ningún secreto embebido en el binario y el coste es de microsegundos.
+///
+/// El archivo es compartido por varias herramientas: se carga y se guarda el diccionario completo,
+/// de modo que las claves que esta herramienta no conoce se conservan intactas.
 /// </summary>
 public sealed class SettingsStore : ISettings
 {

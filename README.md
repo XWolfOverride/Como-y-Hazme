@@ -1,6 +1,6 @@
 # como · hazme
 
-Dos herramientas de línea de comandos para hablar con una IA sin salir de la terminal.
+Dos herramientas de línea de comandos para hablar con una IA sin salir del terminal.
 Comparten configuración y proveedores, pero tienen **filosofías opuestas a propósito**:
 
 | | **`como`** | **`hazme`** |
@@ -120,7 +120,12 @@ Claves globales: `provider`, `no-color`. Cada proveedor añade las suyas (`<prov
 `.model`, `.max-tokens`, `.base-url`). Las API keys también se leen de `ANTHROPIC_API_KEY` y
 `GEMINI_API_KEY` si no hay valor guardado.
 
-Claves propias de `hazme`: `hazme.grace-seconds`, `hazme.max-steps`, `hazme.shell`.
+Claves que añade `hazme` (globales, sin prefijo): `grace-seconds`, `max-steps`, `shell`.
+
+El archivo de configuración es **compartido** entre las herramientas y cada una solo muestra y valida las
+claves que conoce. Las claves desconocidas para una herramienta **se conservan intactas** al guardar: si
+cambias algo con `como`, no se pierde nada de `hazme` (ni de futuras herramientas), y `como -get` no lista
+lo que no es suyo.
 
 ### Dónde y cómo se guarda
 

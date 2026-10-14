@@ -22,9 +22,9 @@ const string Usage = """
       Ctrl-C                      Interrumpe el comando en curso (dos veces: lo mata)
 
     Claves de hazme:
-      hazme.grace-seconds         Segundos de espera visible antes de ejecutar (por defecto 3)
-      hazme.max-steps             Máximo de pasos por trabajo (por defecto 30)
-      hazme.shell                 Shell a usar (por defecto: bash/sh, PowerShell en Windows)
+      grace-seconds               Segundos de espera visible antes de ejecutar (por defecto 3)
+      max-steps                   Máximo de pasos por trabajo (por defecto 30)
+      shell                       Shell a usar (por defecto: bash/sh, PowerShell en Windows)
     """;
 
 Console.OutputEncoding = new UTF8Encoding(false);

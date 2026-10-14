@@ -5,9 +5,9 @@ namespace Hazme;
 /// <summary>Claves de configuración propias de hazme (registradas en el catálogo común al arrancar).</summary>
 internal static class HazmeKeys
 {
-    public const string GraceSeconds = "hazme.grace-seconds";
-    public const string MaxSteps = "hazme.max-steps";
-    public const string Shell = "hazme.shell";
+    public const string GraceSeconds = "grace-seconds";
+    public const string MaxSteps = "max-steps";
+    public const string Shell = "shell";
 
     public static readonly ConfigKey[] All =
     [
