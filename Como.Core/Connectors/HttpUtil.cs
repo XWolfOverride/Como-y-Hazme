@@ -1,9 +1,9 @@
 using System.Net;
 using System.Text.Json;
 
-namespace Como.Providers;
+namespace Como.Connectors;
 
-/// <summary>Utilidades HTTP compartidas por los proveedores (reintentos con backoff exponencial).</summary>
+/// <summary>Utilidades HTTP compartidas por los conectores (reintentos con backoff exponencial).</summary>
 public static class HttpUtil
 {
     public static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(2) };
@@ -38,7 +38,7 @@ public static class HttpUtil
                 if (!IsTransient(resp.StatusCode) || attempt >= MaxRetries)
                 {
                     resp.Dispose();
-                    throw new ProviderException($"Error {code}: {detail}");
+                    throw new ConnectorException($"Error {code}: {detail}");
                 }
 
                 retryAfter = resp.Headers.RetryAfter?.Delta;
@@ -48,12 +48,12 @@ public static class HttpUtil
             catch (HttpRequestException e)
             {
                 if (attempt >= MaxRetries)
-                    throw new ProviderException($"No se pudo conectar con el proveedor: {e.Message}");
+                    throw new ConnectorException($"No se pudo conectar con el conector: {e.Message}");
                 reason = "Fallo de conexión";
             }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested)
             {
-                if (attempt >= MaxRetries) throw new ProviderException("Tiempo de espera agotado.");
+                if (attempt >= MaxRetries) throw new ConnectorException("Tiempo de espera agotado.");
                 reason = "Tiempo de espera agotado";
             }
 

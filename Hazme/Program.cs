@@ -1,6 +1,6 @@
 using System.Text;
 using Como;
-using Como.Providers;
+using Como.Connectors;
 using Como.Settings;
 using Hazme;
 
@@ -9,12 +9,12 @@ const string Usage = """
       hazme <tarea...>            La IA realiza la tarea ejecutando comandos en este equipo
       hazme -get [clave]          Muestra claves y valores (-get <clave> solo el valor)
       hazme -set <clave> <valor>  Establece el valor de una clave
-      hazme -providers            Lista los proveedores implementados
-      hazme -models               Lista los modelos disponibles del proveedor
+      hazme -connectors           Lista los conectores implementados
+      hazme -models               Lista los modelos disponibles del conector
 
     Opciones (en cualquier posición):
       -no-color                   Desactiva los colores en esta llamada
-      -provider <nombre>          Usa un proveedor distinto solo en esta llamada
+      -connector <nombre>         Usa un conector distinto solo en esta llamada
 
     Durante el trabajo:
       Esc                         Aborta el trabajo (también durante el tiempo de gracia)
@@ -53,7 +53,7 @@ try
 
     if (await CliCommon.TryRunAsync(options, store) is { } code) return code;
 
-    var provider = CliCommon.ResolveProvider(store, options.Provider);
+    var connector = CliCommon.ResolveConnector(store, options.Connector);
     shell = new ShellRunner(store);
     var interaction = new Interaction(job);
 
@@ -72,14 +72,14 @@ try
     {
         // El nombre del programa ("hazme") es la primera palabra de la petición: se restaura.
         var task = "hazme " + string.Join(' ', options.Command);
-        return await new JobRunner(Hazme.Chat.ChatClients.For(provider, store), store, interaction, shell, job.Token).RunAsync(task);
+        return await new JobRunner(Hazme.Chat.ChatClients.For(connector, store), store, interaction, shell, job.Token).RunAsync(task);
     }
     finally
     {
         interaction.Stop();
     }
 }
-catch (Exception e) when (e is SettingsException or ProviderException)
+catch (Exception e) when (e is SettingsException or ConnectorException)
 {
     ConsoleUi.Error(e.Message);
     return 1;

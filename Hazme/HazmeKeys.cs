@@ -1,4 +1,4 @@
-using Como.Providers;
+using Como.Connectors;
 
 namespace Hazme;
 

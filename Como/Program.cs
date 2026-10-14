@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using Como;
-using Como.Providers;
+using Como.Connectors;
 using Como.Settings;
 
 const string Usage = """
@@ -10,12 +10,12 @@ const string Usage = """
       como -get                   Lista todas las claves y sus valores
       como -get <clave>           Muestra solo el valor de una clave
       como -set <clave> <valor>   Establece el valor de una clave
-      como -providers             Lista los proveedores implementados
-      como -models                Lista los modelos disponibles del proveedor
+      como -connectors             Lista los conectores implementados
+      como -models                Lista los modelos disponibles del conector
 
     Opciones (en cualquier posición):
       -no-color                   Desactiva los colores en esta llamada
-      -provider <nombre>          Usa un proveedor distinto solo en esta llamada
+      -connector <nombre>         Usa un conector distinto solo en esta llamada
     """;
 
 Console.OutputEncoding = new UTF8Encoding(false);
@@ -40,9 +40,9 @@ try
 
     if (await CliCommon.TryRunAsync(options, store) is { } code) return code;
 
-    return await AskAsync(store, options.Provider, string.Join(' ', options.Command));
+    return await AskAsync(store, options.Connector, string.Join(' ', options.Command));
 }
-catch (Exception e) when (e is SettingsException or ProviderException)
+catch (Exception e) when (e is SettingsException or ConnectorException)
 {
     ConsoleUi.Error(e.Message);
     return 1;
@@ -52,9 +52,9 @@ catch (OperationCanceledException)
     return 130;
 }
 
-static async Task<int> AskAsync(SettingsStore store, string? providerOverride, string question)
+static async Task<int> AskAsync(SettingsStore store, string? connectorOverride, string question)
 {
-    var provider = CliCommon.ResolveProvider(store, providerOverride);
+    var connector = CliCommon.ResolveConnector(store, connectorOverride);
 
     using var cts = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -76,7 +76,7 @@ static async Task<int> AskAsync(SettingsStore store, string? providerOverride, s
     var full = "como " + question;
 
     var renderer = new ResponseRenderer();
-    await foreach (var chunk in provider.AskAsync(full, new AskContext(store, system), cts.Token))
+    await foreach (var chunk in connector.AskAsync(full, new AskContext(store, system), cts.Token))
         renderer.Add(chunk);
     renderer.Complete();
     return 0;

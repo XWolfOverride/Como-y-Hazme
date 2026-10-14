@@ -1,4 +1,4 @@
-using Como.Providers;
+using Como.Connectors;
 using Como.Settings;
 
 namespace Hazme.Chat;
@@ -16,7 +16,7 @@ internal enum ChatRole { User, Assistant }
 
 /// <summary>
 /// Mensaje del historial. Un mensaje de usuario puede llevar resultados de herramientas y/o texto.
-/// Un mensaje del asistente conserva el contenido tal cual lo devolvió el proveedor
+/// Un mensaje del asistente conserva el contenido tal cual lo devolvió el conector
 /// (<c>RawContentJson</c>), que el mismo cliente reenvía sin tocar.
 /// </summary>
 internal sealed record ChatMessage(
@@ -38,20 +38,21 @@ internal interface IChatClient
 
 internal static class ChatClients
 {
-    /// <summary>Cliente de herramientas para el proveedor; cada proveedor nuevo debe añadirse aquí.</summary>
-    public static IChatClient For(IAiProvider provider, ISettings settings) => provider.Id switch
+    /// <summary>Cliente de herramientas para el conector; cada conector nuevo debe añadirse aquí.</summary>
+    public static IChatClient For(IAiConnector connector, ISettings settings) => connector.Id switch
     {
-        "claude" => new ClaudeChat(provider, settings),
-        "gemini" => new GeminiChat(provider, settings),
-        _ => throw new ProviderException($"El proveedor '{provider.Id}' no está soportado por hazme."),
+        "claude" => new ClaudeChat(connector, settings),
+        "gemini" => new GeminiChat(connector, settings),
+        "openai" => new OpenAiChat(connector, settings),
+        _ => throw new ConnectorException($"El conector '{connector.Id}' no está soportado por hazme."),
     };
 }
 
-internal static class ProviderKeys
+internal static class ConnectorKeys
 {
-    public static string Require(IAiProvider p, ISettings s, string name) =>
+    public static string Require(IAiConnector p, ISettings s, string name) =>
         p.Keys.First(k => k.Name == name).Require(s, p.Id);
 
-    public static string Resolve(IAiProvider p, ISettings s, string name) =>
+    public static string Resolve(IAiConnector p, ISettings s, string name) =>
         p.Keys.First(k => k.Name == name).Resolve(s, p.Id) ?? "";
 }

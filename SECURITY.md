@@ -2,7 +2,7 @@
 
 ## Modelo de amenazas, en breve
 
-- **`como`** envía tu pregunta al proveedor de IA y muestra la respuesta. No ejecuta comandos, no lee ni
+- **`como`** envía tu pregunta al conector de IA y muestra la respuesta. No ejecuta comandos, no lee ni
   escribe archivos del usuario. Un fallo que permita lo contrario es una vulnerabilidad.
 - **`hazme`** ejecuta comandos y lee/escribe archivos **por diseño**, con los permisos del usuario y sin
   sandbox. Esto es comportamiento esperado, no una vulnerabilidad. Se mitiga con la visibilidad previa de cada

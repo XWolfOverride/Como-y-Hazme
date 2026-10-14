@@ -1,8 +1,8 @@
 using Como.Settings;
 
-namespace Como.Providers;
+namespace Como.Connectors;
 
-/// <summary>Clave de configuración declarada por un proveedor (se guarda como "&lt;id&gt;.&lt;Name&gt;").</summary>
+/// <summary>Clave de configuración declarada por un conector (se guarda como "&lt;id&gt;.&lt;Name&gt;").</summary>
 public sealed record ConfigKey(
     string Name,
     string Description,
@@ -11,12 +11,12 @@ public sealed record ConfigKey(
     string? EnvVar = null,
     Func<string, string?>? Validate = null)
 {
-    public static string FullName(string providerId, string name) => $"{providerId}.{name}";
+    public static string FullName(string connectorId, string name) => $"{connectorId}.{name}";
 
     /// <summary>Valor guardado, o variable de entorno, o valor por defecto.</summary>
-    public string? Resolve(ISettings settings, string providerId)
+    public string? Resolve(ISettings settings, string connectorId)
     {
-        var v = settings.Get(FullName(providerId, Name));
+        var v = settings.Get(FullName(connectorId, Name));
         if (!string.IsNullOrEmpty(v)) return v;
         if (EnvVar is not null)
         {
@@ -27,23 +27,23 @@ public sealed record ConfigKey(
     }
 
     /// <summary>Como <see cref="Resolve"/>, pero falla con un mensaje claro si no hay valor.</summary>
-    public string Require(ISettings settings, string providerId) =>
-        Resolve(settings, providerId)
-        ?? throw new ProviderException(
-            $"Falta la clave '{FullName(providerId, Name)}'. Configúrala con: -set {FullName(providerId, Name)} <valor>");
+    public string Require(ISettings settings, string connectorId) =>
+        Resolve(settings, connectorId)
+        ?? throw new ConnectorException(
+            $"Falta la clave '{FullName(connectorId, Name)}'. Configúrala con: -set {FullName(connectorId, Name)} <valor>");
 }
 
 public sealed record AskContext(ISettings Settings, string SystemPrompt);
 
-public sealed class ProviderException(string message) : Exception(message);
+public sealed class ConnectorException(string message) : Exception(message);
 
 /// <summary>
-/// Proveedor de IA. Solo sabe preguntar y listar modelos: no hay aquí ninguna noción de herramientas
+/// Conector de IA. Solo sabe preguntar y listar modelos: no hay aquí ninguna noción de herramientas
 /// ni de ejecución; eso vive exclusivamente en el ejecutable "hazme".
 /// </summary>
-public interface IAiProvider
+public interface IAiConnector
 {
-    /// <summary>Identificador usado en la clave global "provider" y como prefijo de sus claves.</summary>
+    /// <summary>Identificador usado en la clave global "connector" y como prefijo de sus claves.</summary>
     string Id { get; }
 
     IReadOnlyList<ConfigKey> Keys { get; }
@@ -51,7 +51,7 @@ public interface IAiProvider
     /// <summary>Envía la pregunta y devuelve la respuesta en fragmentos (streaming).</summary>
     IAsyncEnumerable<string> AskAsync(string question, AskContext context, CancellationToken ct);
 
-    /// <summary>Identificadores de los modelos disponibles en el proveedor.</summary>
+    /// <summary>Identificadores de los modelos disponibles en el conector.</summary>
     Task<IReadOnlyList<string>> ListModelsAsync(ISettings settings, CancellationToken ct);
 
     /// <summary>Nombre de la clave (sin prefijo) que guarda el modelo en uso.</summary>

@@ -3,9 +3,9 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Como.Settings;
 
-namespace Como.Providers;
+namespace Como.Connectors;
 
-public sealed class GeminiProvider : IAiProvider
+public sealed class GeminiConnector : IAiConnector
 {
     private static readonly ConfigKey ApiKey = new("api-key", "API key de Google Gemini", Secret: true, EnvVar: "GEMINI_API_KEY");
     private static readonly ConfigKey Model = new("model", "Modelo a usar", Default: "gemini-3.8-flash");
@@ -103,7 +103,7 @@ public sealed class GeminiProvider : IAiProvider
             var root = doc.RootElement;
 
             if (root.TryGetProperty("error", out _))
-                throw new ProviderException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del proveedor");
+                throw new ConnectorException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del conector");
 
             if (!root.TryGetProperty("candidates", out var cands) || cands.GetArrayLength() == 0) continue;
             if (!cands[0].TryGetProperty("content", out var content)

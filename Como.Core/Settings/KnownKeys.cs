@@ -1,18 +1,18 @@
-using Como.Providers;
+using Como.Connectors;
 
 namespace Como.Settings;
 
-/// <summary>Catálogo de todas las claves válidas: globales + las que declara cada proveedor + extras registradas.</summary>
-public sealed record KnownKey(string FullName, ConfigKey Key, string? ProviderId);
+/// <summary>Catálogo de todas las claves válidas: globales + las que declara cada conector + extras registradas.</summary>
+public sealed record KnownKey(string FullName, ConfigKey Key, string? ConnectorId);
 
 public static class KnownKeys
 {
-    public const string Provider = "provider";
+    public const string Connector = "connector";
     public const string NoColor = "no-color";
 
     private static readonly List<ConfigKey> Globals =
     [
-        new(Provider, "Proveedor de IA en uso", Default: ProviderRegistry.DefaultProviderId),
+        new(Connector, "Conector de IA en uso", Default: ConnectorRegistry.DefaultConnectorId),
         new(NoColor, "Desactivar colores (true/false)", Default: "false"),
     ];
 
@@ -27,7 +27,7 @@ public static class KnownKeys
     {
         foreach (var k in Globals)
             yield return new KnownKey(k.Name, k, null);
-        foreach (var p in ProviderRegistry.All)
+        foreach (var p in ConnectorRegistry.All)
             foreach (var k in p.Keys)
                 yield return new KnownKey(ConfigKey.FullName(p.Id, k.Name), k, p.Id);
     }

@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Como;
-using Como.Providers;
+using Como.Connectors;
 using Como.Settings;
 using Hazme.Chat;
 

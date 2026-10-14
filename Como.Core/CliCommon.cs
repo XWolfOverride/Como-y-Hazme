@@ -1,20 +1,20 @@
-using Como.Providers;
+using Como.Connectors;
 using Como.Settings;
 
 namespace Como;
 
 /// <summary>Opciones globales ya extraídas; <c>Command</c> son los argumentos restantes.</summary>
-public sealed record CliOptions(string[] Command, bool NoColor, string? Provider);
+public sealed record CliOptions(string[] Command, bool NoColor, string? Connector);
 
-/// <summary>Parte común de la CLI de todos los ejecutables: opciones globales, -get, -set, -providers, -models.</summary>
+/// <summary>Parte común de la CLI de todos los ejecutables: opciones globales, -get, -set, -connectors, -models.</summary>
 public static class CliCommon
 {
-    /// <summary>Extrae -no-color y -provider &lt;id&gt; de cualquier posición.</summary>
+    /// <summary>Extrae -no-color y -connector &lt;id&gt; de cualquier posición.</summary>
     public static bool TryParse(string[] args, out CliOptions options)
     {
         var rest = new List<string>(args.Length);
         var noColor = false;
-        string? provider = null;
+        string? connector = null;
         options = new CliOptions([], false, null);
 
         for (var i = 0; i < args.Length; i++)
@@ -24,13 +24,13 @@ public static class CliCommon
                 case "-no-color":
                     noColor = true;
                     break;
-                case "-provider":
+                case "-connector":
                     if (i + 1 >= args.Length)
                     {
-                        ConsoleUi.Error("Uso: -provider <nombre>");
+                        ConsoleUi.Error("Uso: -connector <nombre>");
                         return false;
                     }
-                    provider = args[++i];
+                    connector = args[++i];
                     break;
                 default:
                     rest.Add(args[i]);
@@ -38,11 +38,11 @@ public static class CliCommon
             }
         }
 
-        options = new CliOptions(rest.ToArray(), noColor, provider);
+        options = new CliOptions(rest.ToArray(), noColor, connector);
         return true;
     }
 
-    /// <summary>Ejecuta -get/-set/-providers/-models. Devuelve null si el comando no es uno de ellos.</summary>
+    /// <summary>Ejecuta -get/-set/-connectors/-models. Devuelve null si el comando no es uno de ellos.</summary>
     public static async Task<int?> TryRunAsync(CliOptions o, SettingsStore store)
     {
         if (o.Command.Length == 0) return null;
@@ -50,44 +50,44 @@ public static class CliCommon
         {
             "-get" => Get(store, o.Command),
             "-set" => Set(store, o.Command),
-            "-providers" => Providers(store, o.Provider),
-            "-models" => await ModelsAsync(store, o.Provider),
+            "-connectors" => Connectors(store, o.Connector),
+            "-models" => await ModelsAsync(store, o.Connector),
             _ => null,
         };
     }
 
-    public static IAiProvider ResolveProvider(ISettings store, string? providerOverride)
+    public static IAiConnector ResolveConnector(ISettings store, string? connectorOverride)
     {
-        var id = providerOverride ?? store.Get(KnownKeys.Provider) ?? ProviderRegistry.DefaultProviderId;
-        return ProviderRegistry.Find(id)
-            ?? throw new ProviderException(
-                $"Proveedor desconocido: {id}. Disponibles: {string.Join(", ", ProviderRegistry.All.Select(x => x.Id))}");
+        var id = connectorOverride ?? store.Get(KnownKeys.Connector) ?? ConnectorRegistry.DefaultConnectorId;
+        return ConnectorRegistry.Find(id)
+            ?? throw new ConnectorException(
+                $"Conector desconocido: {id}. Disponibles: {string.Join(", ", ConnectorRegistry.All.Select(x => x.Id))}");
     }
 
     private static string? EffectiveValue(SettingsStore store, KnownKey k) =>
-        k.ProviderId is null
+        k.ConnectorId is null
             ? store.Get(k.FullName) ?? k.Key.Default
-            : k.Key.Resolve(store, k.ProviderId);
+            : k.Key.Resolve(store, k.ConnectorId);
 
     public static string Mask(string v) => v.Length <= 8 ? new string('*', v.Length) : v[..4] + "…" + v[^4..];
 
-    private static int Providers(SettingsStore store, string? providerOverride)
+    private static int Connectors(SettingsStore store, string? connectorOverride)
     {
-        var current = ResolveProvider(store, providerOverride).Id;
-        foreach (var p in ProviderRegistry.All)
+        var current = ResolveConnector(store, connectorOverride).Id;
+        foreach (var p in ConnectorRegistry.All)
             WriteChoice(p.Id, p.Id == current);
         return 0;
     }
 
-    private static async Task<int> ModelsAsync(SettingsStore store, string? providerOverride)
+    private static async Task<int> ModelsAsync(SettingsStore store, string? connectorOverride)
     {
-        var provider = ResolveProvider(store, providerOverride);
-        var current = provider.Keys.First(k => k.Name == provider.ModelKeyName).Resolve(store, provider.Id);
+        var connector = ResolveConnector(store, connectorOverride);
+        var current = connector.Keys.First(k => k.Name == connector.ModelKeyName).Resolve(store, connector.Id);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
-        foreach (var m in await provider.ListModelsAsync(store, cts.Token))
+        foreach (var m in await connector.ListModelsAsync(store, cts.Token))
             WriteChoice(m, m == current);
         return 0;
     }
@@ -168,11 +168,11 @@ public static class CliCommon
 
         switch (key.FullName)
         {
-            case KnownKeys.Provider:
-                var p = ProviderRegistry.Find(value);
+            case KnownKeys.Connector:
+                var p = ConnectorRegistry.Find(value);
                 if (p is null)
                 {
-                    ConsoleUi.Error($"Proveedor desconocido: {value}. Disponibles: {string.Join(", ", ProviderRegistry.All.Select(x => x.Id))}");
+                    ConsoleUi.Error($"Conector desconocido: {value}. Disponibles: {string.Join(", ", ConnectorRegistry.All.Select(x => x.Id))}");
                     return 1;
                 }
                 value = p.Id;

@@ -1,12 +1,12 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Como.Providers;
+using Como.Connectors;
 using Como.Settings;
 
 namespace Hazme.Chat;
 
-internal sealed class ClaudeChat(IAiProvider provider, ISettings settings) : IChatClient
+internal sealed class ClaudeChat(IAiConnector connector, ISettings settings) : IChatClient
 {
     private sealed class Block
     {
@@ -19,11 +19,11 @@ internal sealed class ClaudeChat(IAiProvider provider, ISettings settings) : ICh
     public async Task<ChatTurn> ChatAsync(
         IReadOnlyList<ChatMessage> history, ChatRequest request, Action<string> onText, CancellationToken ct)
     {
-        var apiKey = ProviderKeys.Require(provider, settings, "api-key");
-        var model = ProviderKeys.Resolve(provider, settings, "model");
-        var baseUrl = ProviderKeys.Resolve(provider, settings, "base-url").TrimEnd('/');
+        var apiKey = ConnectorKeys.Require(connector, settings, "api-key");
+        var model = ConnectorKeys.Resolve(connector, settings, "model");
+        var baseUrl = ConnectorKeys.Resolve(connector, settings, "base-url").TrimEnd('/');
         var maxTokens = Math.Max(
-            HttpUtil.ParsePositive(ProviderKeys.Resolve(provider, settings, "max-tokens"), 1024),
+            HttpUtil.ParsePositive(ConnectorKeys.Resolve(connector, settings, "max-tokens"), 1024),
             request.MinMaxTokens);
 
         using var body = new MemoryStream();
@@ -141,7 +141,7 @@ internal sealed class ClaudeChat(IAiProvider provider, ISettings settings) : ICh
                     break;
                 }
                 case "error":
-                    throw new ProviderException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del proveedor");
+                    throw new ConnectorException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del conector");
                 case "message_stop":
                     done = true;
                     break;

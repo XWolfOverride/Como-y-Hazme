@@ -3,9 +3,9 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Como.Settings;
 
-namespace Como.Providers;
+namespace Como.Connectors;
 
-public sealed class ClaudeProvider : IAiProvider
+public sealed class ClaudeConnector : IAiConnector
 {
     private static readonly ConfigKey ApiKey = new("api-key", "API key de Anthropic", Secret: true, EnvVar: "ANTHROPIC_API_KEY");
     private static readonly ConfigKey Model = new("model", "Modelo a usar", Default: "claude-sonnet-5-5");
@@ -95,7 +95,7 @@ public sealed class ClaudeProvider : IAiProvider
                         yield return chunk;
                     break;
                 case "error":
-                    throw new ProviderException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del proveedor");
+                    throw new ConnectorException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del conector");
                 case "message_stop":
                     yield break;
             }
