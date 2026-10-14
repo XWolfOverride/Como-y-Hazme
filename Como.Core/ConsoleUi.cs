@@ -18,10 +18,16 @@ public static class ConsoleUi
             writer.Write(text);
             return;
         }
-        Console.ForegroundColor = color;
-        writer.Write(text);
-        Console.ResetColor();
+        // El color es estado global de la consola: se serializa para que hilos distintos no se pisen.
+        lock (Gate)
+        {
+            Console.ForegroundColor = color;
+            writer.Write(text);
+            Console.ResetColor();
+        }
     }
+
+    private static readonly object Gate = new();
 
     public static void WriteLine(string text, ConsoleColor color, bool error = false)
     {

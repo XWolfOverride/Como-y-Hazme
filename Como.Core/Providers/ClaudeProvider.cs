@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Como.Settings;
 
 namespace Como.Providers;
 
@@ -17,7 +18,7 @@ public sealed class ClaudeProvider : IAiProvider
 
     public string ModelKeyName => Model.Name;
 
-    public async Task<IReadOnlyList<string>> ListModelsAsync(Como.Settings.ISettings settings, CancellationToken ct)
+    public async Task<IReadOnlyList<string>> ListModelsAsync(ISettings settings, CancellationToken ct)
     {
         var apiKey = ApiKey.Require(settings, Id);
         var baseUrl = BaseUrl.Resolve(settings, Id)!.TrimEnd('/');

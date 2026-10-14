@@ -8,7 +8,8 @@ public sealed record ConfigKey(
     string Description,
     string? Default = null,
     bool Secret = false,
-    string? EnvVar = null)
+    string? EnvVar = null,
+    Func<string, string?>? Validate = null)
 {
     public static string FullName(string providerId, string name) => $"{providerId}.{name}";
 
@@ -29,13 +30,17 @@ public sealed record ConfigKey(
     public string Require(ISettings settings, string providerId) =>
         Resolve(settings, providerId)
         ?? throw new ProviderException(
-            $"Falta la clave '{FullName(providerId, Name)}'. Usa: como -set {FullName(providerId, Name)} <valor>");
+            $"Falta la clave '{FullName(providerId, Name)}'. Configúrala con: -set {FullName(providerId, Name)} <valor>");
 }
 
 public sealed record AskContext(ISettings Settings, string SystemPrompt);
 
 public sealed class ProviderException(string message) : Exception(message);
 
+/// <summary>
+/// Proveedor de IA. Solo sabe preguntar y listar modelos: no hay aquí ninguna noción de herramientas
+/// ni de ejecución; eso vive exclusivamente en el ejecutable "hazme".
+/// </summary>
 public interface IAiProvider
 {
     /// <summary>Identificador usado en la clave global "provider" y como prefijo de sus claves.</summary>

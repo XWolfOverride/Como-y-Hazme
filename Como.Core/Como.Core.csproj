@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>Como.Core</AssemblyName>
+  </PropertyGroup>
+
+</Project>

@@ -3,8 +3,8 @@ using System.Text.Json;
 
 namespace Como.Providers;
 
-/// <summary>Utilidades HTTP compartidas por los proveedores.</summary>
-internal static class HttpUtil
+/// <summary>Utilidades HTTP compartidas por los proveedores (reintentos con backoff exponencial).</summary>
+public static class HttpUtil
 {
     public static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(2) };
 
