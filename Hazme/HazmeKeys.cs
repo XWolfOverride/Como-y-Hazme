@@ -8,6 +8,7 @@ internal static class HazmeKeys
     public const string GraceSeconds = "grace-seconds";
     public const string MaxSteps = "max-steps";
     public const string Shell = "shell";
+    public const string ConfirmChanges = "confirm-changes";
 
     public static readonly ConfigKey[] All =
     [
@@ -16,5 +17,7 @@ internal static class HazmeKeys
         new(MaxSteps, "hazme: máximo de pasos (llamadas a la IA) por trabajo", Default: "30",
             Validate: v => int.TryParse(v, out var n) && n > 0 ? null : "requiere un número entero > 0"),
         new(Shell, "hazme: shell a usar (vacío = automática)"),
+        new(ConfirmChanges, "hazme: confirmar con diff toda escritura de archivos (true/false)", Default: "false",
+            Validate: v => v is "true" or "false" ? null : "admite 'true' o 'false'"),
     ];
 }

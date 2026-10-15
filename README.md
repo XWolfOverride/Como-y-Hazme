@@ -7,8 +7,8 @@ Comparten configuración y conectores, pero tienen **filosofías opuestas a prop
 |---|---|---|
 | Qué es | Un oráculo: responde a tu pregunta | Un asistente: hace la tarea por ti |
 | Ejecuta comandos | **Nunca. Imposible por construcción** | Sí, con supervisión |
-| Lee tus archivos | **No** | Sí (`read_file`, `list_dir`) |
-| Escribe archivos | **No** | Sí (`write_file`) |
+| Lee tus archivos | **No** | Sí (`read_file`, `list_dir`, `stat_path`) |
+| Escribe archivos | **No** | Sí (`write_file`, `propose_change`) |
 | Puede pedirte datos | No | Sí (`ask_user`) |
 | Ejemplo | `como comprimo esta carpeta en zip` | `hazme un zip de esta carpeta` |
 
@@ -68,7 +68,30 @@ En lugar de preguntar "¿s/n?" antes de cada comando, `hazme` te deja el control
 - **Puedes dialogar mientras trabaja**: escribe y pulsa Enter, y tu nota llega a la IA en el siguiente paso.
 - **Límite de pasos** por trabajo (30 por defecto) para evitar bucles.
 
-Herramientas que se ofrecen al modelo: `run_command`, `read_file`, `list_dir`, `write_file`, `ask_user`.
+### Herramientas internas
+
+Además de lanzar comandos, `hazme` ofrece a la IA unas herramientas propias. Son portables (se comportan
+igual en Windows, Linux y macOS), devuelven resultados compactos y permiten que `hazme` muestre
+exactamente qué va a hacer:
+
+| Herramienta | Qué hace |
+|---|---|
+| `run_command` | Lanza un comando en el shell del sistema y devuelve código de salida, stdout y stderr |
+| `list_dir` | Lista un directorio **en árbol** (directorios primero, archivos con tamaño), con profundidad configurable |
+| `read_file` | Lee un archivo de texto, completo o por tramos (`start_line`, `max_lines`); rechaza binarios |
+| `stat_path` | Comprueba si un archivo o directorio existe y devuelve su tipo, tamaño y fecha |
+| `write_file` | Crea o sobrescribe un archivo |
+| `propose_change` | Muestra un **diff** y deja que tú decidas: **A**plicar, **D**escartar o dar **I**nstrucciones para que la IA lo reformule |
+| `ask_user` | Hace una pregunta al usuario |
+
+**Diff con confirmación, sin ser invasivo.** La IA usa `write_file` para cambios normales y
+`propose_change` para cambios críticos, archivos de configuración o del sistema, o si pediste confirmar.
+Además, `hazme` fuerza el diff por sí mismo cuando la ruta es sensible, aunque la IA use `write_file`:
+`/etc`, `/usr`, `/boot`... (en Windows, `C:\Windows` y `Program Files`), `~/.ssh`, `~/.gnupg`, `~/.como` y
+los archivos de arranque del shell (`.bashrc`, `.zshrc`, `.profile`...).
+
+Si prefieres revisar **todo** lo que se escriba, usa `-confirm` en una llamada o
+`hazme -set confirm-changes true` de forma permanente.
 
 ### Qué conviene tener presente
 
@@ -320,7 +343,7 @@ Claves globales: `connector`, `no-color`. Cada conector añade las suyas con su 
 y `gemini`). Las API keys también se leen de variables de entorno si no hay valor guardado
 (ver tabla de conectores).
 
-Claves que añade `hazme` (globales, sin prefijo): `grace-seconds`, `max-steps`, `shell`.
+Claves que añade `hazme` (globales, sin prefijo): `grace-seconds`, `max-steps`, `shell`, `confirm-changes`.
 
 El archivo de configuración es **compartido** entre las herramientas y cada una solo muestra y valida las
 claves que conoce. Las claves desconocidas para una herramienta **se conservan intactas** al guardar: si

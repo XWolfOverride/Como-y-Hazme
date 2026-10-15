@@ -15,16 +15,19 @@ const string Usage = """
     Opciones (en cualquier posición):
       -no-color                   Desactiva los colores en esta llamada
       -connector <nombre>         Usa un conector distinto solo en esta llamada
+      -confirm                    Confirma con diff TODA escritura de archivos en esta llamada
 
     Durante el trabajo:
       Esc                         Aborta el trabajo (también durante el tiempo de gracia)
       escribir + Enter            Envía una nota a la IA para el siguiente paso
       Ctrl-C                      Interrumpe el comando en curso (dos veces: lo mata)
+      A / D / I                   En un diff: Aplicar, Descartar o dar Instrucciones
 
     Claves de hazme:
       grace-seconds               Segundos de espera visible antes de ejecutar (por defecto 3)
       max-steps                   Máximo de pasos por trabajo (por defecto 30)
       shell                       Shell a usar (por defecto: bash/sh, PowerShell en Windows)
+      confirm-changes             true = confirmar con diff toda escritura de archivos (por defecto false)
     """;
 
 Console.OutputEncoding = new UTF8Encoding(false);
@@ -34,7 +37,9 @@ var shell = default(ShellRunner);
 
 try
 {
-    if (!CliCommon.TryParse(args, out var options)) return 1;
+    // -confirm es propio de hazme y puede ir en cualquier posición.
+    var confirmFlag = args.Contains("-confirm");
+    if (!CliCommon.TryParse(args.Where(a => a != "-confirm").ToArray(), out var options)) return 1;
 
     if (options.Command.Length == 0)
     {
@@ -72,7 +77,9 @@ try
     {
         // El nombre del programa ("hazme") es la primera palabra de la petición: se restaura.
         var task = "hazme " + string.Join(' ', options.Command);
-        return await new JobRunner(Hazme.Chat.ChatClients.For(connector, store), store, interaction, shell, job.Token).RunAsync(task);
+        var confirmAll = confirmFlag || KnownKeys.IsTrue(KnownKeys.Value(store, HazmeKeys.ConfirmChanges));
+        var chat = Hazme.Chat.ChatClients.For(connector, store);
+        return await new JobRunner(chat, store, interaction, shell, confirmAll, job.Token).RunAsync(task);
     }
     finally
     {

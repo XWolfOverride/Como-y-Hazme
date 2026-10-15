@@ -13,13 +13,12 @@ namespace Hazme;
 /// se ejecutan, y el resultado vuelve a la IA hasta que termina, el usuario aborta o se agotan los pasos.
 /// </summary>
 internal sealed class JobRunner(
-    IChatClient chat, SettingsStore settings, Interaction interaction, ShellRunner shell, CancellationToken ct)
+    IChatClient chat, SettingsStore settings, Interaction interaction, ShellRunner shell,
+    bool confirmAllChanges, CancellationToken ct)
 {
     private const ConsoleColor NarrationColor = ConsoleColor.Yellow;
     private const ConsoleColor CommandColor = ConsoleColor.Green;
     private const ConsoleColor InfoColor = ConsoleColor.Cyan;
-    private const int MaxFileChars = 64_000;
-    private const int MaxListEntries = 500;
 
     private static readonly IReadOnlyList<ToolSpec> Tools =
     [
@@ -28,14 +27,23 @@ internal sealed class JobRunner(
             "Each call uses a fresh shell; 'cd' does not persist between calls.",
             """{"type":"object","properties":{"command":{"type":"string","description":"The command line to run"},"cwd":{"type":"string","description":"Working directory (optional, defaults to the current directory)"}},"required":["command"]}"""),
         new("read_file",
-            "Read a text file and return its contents (truncated if very large).",
-            """{"type":"object","properties":{"path":{"type":"string","description":"File path"}},"required":["path"]}"""),
+            "Read a text file and return its contents (truncated if very large). Use start_line/max_lines to read a section of a big file.",
+            """{"type":"object","properties":{"path":{"type":"string","description":"File path"},"start_line":{"type":"integer","description":"First line to read (1-based, optional)"},"max_lines":{"type":"integer","description":"Maximum number of lines to return (optional)"}},"required":["path"]}"""),
         new("list_dir",
-            "List the entries of a directory. Directories end with '/'.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"Directory path (defaults to current directory)"},"recursive":{"type":"boolean","description":"Include subdirectories (max depth 3)"}},"required":[]}"""),
+            "List a directory as a tree (directories first, files with size). Use max_depth to descend into subdirectories.",
+            """{"type":"object","properties":{"path":{"type":"string","description":"Directory path (defaults to current directory)"},"max_depth":{"type":"integer","description":"Levels to show, 1-6 (default 1 = only the directory's direct entries)"}},"required":[]}"""),
+        new("stat_path",
+            "Check whether a file or directory exists and return its type, size and modification time.",
+            """{"type":"object","properties":{"path":{"type":"string","description":"Path to check"}},"required":["path"]}"""),
         new("write_file",
-            "Create or overwrite a text file with the given content (parent directories are created).",
+            "Create or overwrite a text file with the given full content (parent directories are created). " +
+            "For critical, configuration or system files use propose_change instead.",
             """{"type":"object","properties":{"path":{"type":"string","description":"File path"},"content":{"type":"string","description":"Full file content"}},"required":["path","content"]}"""),
+        new("propose_change",
+            "Show the user a diff of a file change and let them apply it, discard it or ask for a revision. " +
+            "Use it for critical changes, configuration files, system files that could cause problems, or whenever the user asked to confirm changes. " +
+            "Provide the complete new content of the file.",
+            """{"type":"object","properties":{"path":{"type":"string","description":"File path"},"content":{"type":"string","description":"Complete new content of the file"},"summary":{"type":"string","description":"One short sentence explaining the change and why"}},"required":["path","content"]}"""),
         new("ask_user",
             "Ask the user a question and wait for the answer. Use it when you need a decision or after a command was interrupted.",
             """{"type":"object","properties":{"question":{"type":"string","description":"The question"}},"required":["question"]}"""),
@@ -111,11 +119,15 @@ internal sealed class JobRunner(
                 case "run_command":
                     return await RunCommandAsync(call, Str(a, "command"), Str(a, "cwd"));
                 case "read_file":
-                    return ReadFile(call, Str(a, "path"));
+                    return ReadFile(call, Str(a, "path"), Int(a, "start_line"), Int(a, "max_lines"));
                 case "list_dir":
-                    return ListDir(call, Str(a, "path") ?? ".", a.TryGetProperty("recursive", out var r) && r.ValueKind == JsonValueKind.True);
+                    return ListDir(call, Str(a, "path") ?? ".", Int(a, "max_depth") ?? 1);
+                case "stat_path":
+                    return StatPath(call, Str(a, "path"));
                 case "write_file":
                     return await WriteFileAsync(call, Str(a, "path"), Str(a, "content"));
+                case "propose_change":
+                    return await ProposeChangeAsync(call, Str(a, "path"), Str(a, "content"), Str(a, "summary"));
                 case "ask_user":
                     return AskUser(call, Str(a, "question"));
                 default:
@@ -158,15 +170,29 @@ internal sealed class JobRunner(
         return new ToolResult(call.Id, call.Name, sb.ToString(), IsError: res.ExitCode != 0 || res.Interrupted);
     }
 
-    private ToolResult ReadFile(ToolCall call, string? path)
+    private ToolResult ReadFile(ToolCall call, string? path, int? startLine, int? maxLines)
     {
         if (string.IsNullOrWhiteSpace(path)) return Fail(call, "Missing 'path'.");
         ConsoleUi.WriteLine($"» leer {path}", InfoColor);
         try
         {
-            var text = File.ReadAllText(path);
-            if (text.Length > MaxFileChars)
-                text = text[..MaxFileChars] + $"\n[... truncado: {text.Length - MaxFileChars} caracteres más ...]";
+            var full = FileTools.Resolve(path);
+            if (!File.Exists(full)) return Fail(call, $"File not found: {path}");
+            if (FileTools.LooksBinary(full))
+                return Fail(call, $"Binary file ({FileTools.FormatSize(new FileInfo(full).Length)}); not shown.");
+
+            var text = File.ReadAllText(full);
+            if (startLine is > 1 || maxLines is > 0)
+            {
+                var lines = TextDiff.SplitLines(text);
+                var from = Math.Clamp((startLine ?? 1) - 1, 0, lines.Length);
+                var count = maxLines is > 0 ? Math.Min(maxLines.Value, lines.Length - from) : lines.Length - from;
+                text = string.Join('\n', lines.Skip(from).Take(count))
+                       + $"\n[líneas {from + 1}-{from + count} de {lines.Length}]";
+            }
+            if (text.Length > FileTools.MaxFileChars)
+                text = text[..FileTools.MaxFileChars]
+                       + $"\n[... truncado: {text.Length - FileTools.MaxFileChars} caracteres más; usa start_line/max_lines ...]";
             return new ToolResult(call.Id, call.Name, text);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
@@ -175,29 +201,15 @@ internal sealed class JobRunner(
         }
     }
 
-    private ToolResult ListDir(ToolCall call, string path, bool recursive)
+    private ToolResult ListDir(ToolCall call, string path, int maxDepth)
     {
-        ConsoleUi.WriteLine($"» listar {path}{(recursive ? " (recursivo)" : "")}", InfoColor);
+        maxDepth = Math.Clamp(maxDepth, 1, 6);
+        ConsoleUi.WriteLine($"» listar {path}{(maxDepth > 1 ? $" (profundidad {maxDepth})" : "")}", InfoColor);
         try
         {
-            var root = Path.GetFullPath(path);
-            var sb = new StringBuilder();
-            var count = 0;
-
-            void Walk(string dir, int depth)
-            {
-                foreach (var entry in Directory.EnumerateFileSystemEntries(dir).Order(StringComparer.OrdinalIgnoreCase))
-                {
-                    if (count++ >= MaxListEntries) return;
-                    var isDir = Directory.Exists(entry);
-                    sb.Append(Path.GetRelativePath(root, entry)).Append(isDir ? "/" : "").Append('\n');
-                    if (recursive && isDir && depth < 3) Walk(entry, depth + 1);
-                }
-            }
-
-            Walk(root, 1);
-            if (count > MaxListEntries) sb.Append($"[... lista truncada a {MaxListEntries} entradas ...]\n");
-            return new ToolResult(call.Id, call.Name, sb.Length == 0 ? "(empty directory)" : sb.ToString());
+            var root = FileTools.Resolve(path);
+            if (!Directory.Exists(root)) return Fail(call, $"Directory not found: {path}");
+            return new ToolResult(call.Id, call.Name, FileTools.ListTree(root, maxDepth));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
@@ -205,10 +217,153 @@ internal sealed class JobRunner(
         }
     }
 
+    private ToolResult StatPath(ToolCall call, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return Fail(call, "Missing 'path'.");
+        ConsoleUi.WriteLine($"» comprobar {path}", InfoColor);
+        try
+        {
+            var full = FileTools.Resolve(path);
+            string text;
+            if (File.Exists(full))
+            {
+                var fi = new FileInfo(full);
+                text = $"exists: true\ntype: file\nsize: {fi.Length} bytes ({FileTools.FormatSize(fi.Length)})\nmodified: {fi.LastWriteTimeUtc:u}\nfull_path: {full}";
+            }
+            else if (Directory.Exists(full))
+            {
+                text = $"exists: true\ntype: directory\nmodified: {Directory.GetLastWriteTimeUtc(full):u}\nfull_path: {full}";
+            }
+            else
+            {
+                text = $"exists: false\nfull_path: {full}";
+            }
+            return new ToolResult(call.Id, call.Name, text);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return Fail(call, e.Message);
+        }
+    }
+
+    /// <summary>
+    /// Muestra el cambio como diff y deja al usuario aplicarlo, descartarlo o pedir una revisión.
+    /// Esc aborta el trabajo.
+    /// </summary>
+    private async Task<ToolResult> ProposeChangeAsync(ToolCall call, string? path, string? content, string? summary)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return Fail(call, "Missing 'path'.");
+        content ??= "";
+
+        string full;
+        string? current = null;
+        try
+        {
+            full = FileTools.Resolve(path);
+            if (Directory.Exists(full)) return Fail(call, $"{path} is a directory.");
+            if (File.Exists(full))
+            {
+                if (new FileInfo(full).Length > 2_000_000 || FileTools.LooksBinary(full))
+                    return Fail(call, "File is binary or too large to show a diff; use run_command instead.");
+                current = File.ReadAllText(full);
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return Fail(call, e.Message);
+        }
+
+        // Conserva los saltos de línea CRLF de un archivo que ya los usaba.
+        if (current is not null && current.Contains("\r\n") && !content.Contains('\r'))
+            content = content.Replace("\n", "\r\n");
+
+        Console.WriteLine();
+        ConsoleUi.Write("± cambio propuesto: ", ConsoleColor.Magenta);
+        ConsoleUi.WriteLine(path + (current is null ? " (archivo nuevo)" : ""), ConsoleColor.Magenta);
+        if (!string.IsNullOrWhiteSpace(summary)) ConsoleUi.WriteLine("  " + summary, ConsoleColor.DarkGray);
+
+        var oldLines = current is null ? [] : TextDiff.SplitLines(current);
+        var newLines = TextDiff.SplitLines(content);
+        var diff = TextDiff.Compute(oldLines, newLines);
+        if (diff is null)
+        {
+            ConsoleUi.WriteLine(
+                $"  (cambio demasiado grande para comparar: {oldLines.Length} → {newLines.Length} líneas)", ConsoleColor.DarkGray);
+        }
+        else if (diff.All(d => d.Op == TextDiff.Op.Equal) && current == content)
+        {
+            return new ToolResult(call.Id, call.Name, "No changes: the file already has this content.");
+        }
+        else
+        {
+            var (added, removed) = TextDiff.Count(diff);
+            ConsoleUi.WriteLine($"  +{added} -{removed} líneas", ConsoleColor.DarkGray);
+            if (!TextDiff.Print(diff))
+                ConsoleUi.WriteLine("  … (diff truncado en pantalla)", ConsoleColor.DarkGray);
+        }
+
+        if (!interaction.Interactive)
+            return Fail(call, "Cannot ask for confirmation without an interactive terminal; the change was not applied.");
+
+        while (true)
+        {
+            Console.WriteLine();
+            ConsoleUi.Write("[A]", ConsoleColor.Green);
+            ConsoleUi.Write("plicar  ", ConsoleColor.Gray);
+            ConsoleUi.Write("[D]", ConsoleColor.Red);
+            ConsoleUi.Write("escartar  ", ConsoleColor.Gray);
+            ConsoleUi.Write("[I]", ConsoleColor.Cyan);
+            ConsoleUi.WriteLine("nstrucciones   (Esc aborta el trabajo)", ConsoleColor.Gray);
+
+            var choice = interaction.ReadChoice("adi");
+            ct.ThrowIfCancellationRequested();
+
+            switch (choice)
+            {
+                case 'a':
+                    try
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+                        await File.WriteAllTextAsync(full, content, new UTF8Encoding(false), ct);
+                    }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+                    {
+                        return Fail(call, e.Message);
+                    }
+                    ConsoleUi.WriteLine("  ✔ aplicado", ConsoleColor.Green);
+                    return new ToolResult(call.Id, call.Name, current is null ? $"Created {path}" : $"Applied change to {path}");
+
+                case 'd':
+                    ConsoleUi.WriteLine("  ✖ descartado", ConsoleColor.Red);
+                    return new ToolResult(call.Id, call.Name,
+                        "The user DISCARDED this change; the file was not modified. Do not retry it unless the user asks.");
+
+                case 'i':
+                    ConsoleUi.Write("instrucciones › ", ConsoleColor.White);
+                    var text = interaction.ReadLine();
+                    ct.ThrowIfCancellationRequested();
+                    if (string.IsNullOrWhiteSpace(text)) continue; // volver a elegir
+                    return new ToolResult(call.Id, call.Name,
+                        "The user did NOT apply this change and asks for a revision: " + text +
+                        "\nPropose a new version with propose_change.");
+
+                default:
+                    return Fail(call, "No choice was made; the change was not applied.");
+            }
+        }
+    }
+
     private async Task<ToolResult> WriteFileAsync(ToolCall call, string? path, string? content)
     {
         if (string.IsNullOrWhiteSpace(path)) return Fail(call, "Missing 'path'.");
         content ??= "";
+
+        // Rutas sensibles (sistema, ssh, arranque del shell...) o confirmación global: siempre con diff.
+        string? fullPath = null;
+        try { fullPath = FileTools.Resolve(path); } catch (ArgumentException) { }
+        if (confirmAllChanges || (fullPath is not null && FileTools.IsSensitivePath(fullPath)))
+            return await ProposeChangeAsync(call, path, content,
+                confirmAllChanges ? "confirmación de cambios activada" : "ruta sensible: requiere confirmación");
 
         var lines = content.Split('\n').Length;
         Console.WriteLine();
@@ -222,7 +377,7 @@ internal sealed class JobRunner(
 
         try
         {
-            var full = Path.GetFullPath(path);
+            var full = FileTools.Resolve(path);
             var existed = File.Exists(full);
             Directory.CreateDirectory(Path.GetDirectoryName(full)!);
             await File.WriteAllTextAsync(full, content, new UTF8Encoding(false), ct);
@@ -280,6 +435,12 @@ internal sealed class JobRunner(
             ? v.GetString()
             : null;
 
+    private static int? Int(JsonElement obj, string name) =>
+        obj.ValueKind == JsonValueKind.Object && obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number
+            && v.TryGetInt32(out var n)
+            ? n
+            : null;
+
     private string BuildSystemPrompt()
     {
         var shellName = OperatingSystem.IsWindows()
@@ -291,7 +452,10 @@ internal sealed class JobRunner(
 
             Rules:
             - Work step by step. Before acting, say in one short sentence what you are about to do. Keep all text brief and plain (no markdown).
-            - Inspect before changing: use list_dir/read_file or read-only commands to understand the situation first.
+            - Inspect before changing. Prefer the built-in tools over shell commands for files: list_dir (tree), read_file, stat_path (exists?), write_file, propose_change. They behave the same on every OS.
+            - Writing files: use write_file for ordinary files. Use propose_change (which shows the user a diff to apply, discard or revise) for critical changes, configuration files, system files that could cause problems, or whenever the user asked to confirm changes. Do not use it for trivial edits; stay unobtrusive.
+            - If propose_change reports that the user asked for a revision, produce a new version following their instructions. If they discarded it, do not insist.
+            - Before overwriting an existing file you did not create, check it with stat_path/read_file.
             - Every command is shown to the user, who may abort the whole job at any time with Esc. Prefer non-interactive flags (e.g. -y) and avoid unnecessary destructive operations.
             - Each run_command is a fresh shell: use `cd dir && cmd` or the cwd parameter, never rely on a previous cd.
             - Check each result (exit code, stderr). If a command fails, diagnose and fix it; do not repeat the same failing command blindly.

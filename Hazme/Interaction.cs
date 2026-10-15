@@ -112,6 +112,35 @@ internal sealed class Interaction
         }
     }
 
+    /// <summary>
+    /// Espera una tecla que esté en <paramref name="valid"/> (sin distinguir mayúsculas).
+    /// Esc aborta el trabajo y devuelve null; también null si no hay terminal interactivo.
+    /// </summary>
+    public char? ReadChoice(string valid)
+    {
+        if (!Interactive) return null;
+
+        using var _ = Pause();
+        while (true)
+        {
+            if (_job.IsCancellationRequested) return null;
+            if (!Console.KeyAvailable)
+            {
+                Thread.Sleep(25);
+                continue;
+            }
+
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.Escape)
+            {
+                _job.Cancel();
+                return null;
+            }
+            var c = char.ToLowerInvariant(k.KeyChar);
+            if (valid.Contains(c)) return c;
+        }
+    }
+
     /// <summary>Lee una línea del usuario. Devuelve null si pulsa Esc, Ctrl-C o no hay entrada.</summary>
     public string? ReadLine()
     {
