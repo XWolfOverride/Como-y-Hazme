@@ -1,6 +1,6 @@
 # como / hazme - autocompilación NativeAOT para Windows (PowerShell 5.1 o superior).
 #
-#   irm https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/main/build.ps1 | iex
+#   irm https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/master/build.ps1 | iex
 #
 # Qué hace:
 #   1. Comprueba que están instaladas las herramientas necesarias (NO instala nada).

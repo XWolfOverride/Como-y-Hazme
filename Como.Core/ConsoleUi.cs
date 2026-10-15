@@ -18,6 +18,10 @@ public static class ConsoleUi
             writer.Write(text);
             return;
         }
+        // DarkGray es el "negro brillante" (ANSI 90 / color 8): en PuTTY y otros terminales con paleta
+        // propia se dibuja negro sobre negro. Gray (ANSI 37) se ve en cualquier terminal.
+        if (color == ConsoleColor.DarkGray) color = ConsoleColor.Gray;
+
         // El color es estado global de la consola: se serializa para que hilos distintos no se pisen.
         lock (Gate)
         {

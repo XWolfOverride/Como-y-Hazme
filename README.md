@@ -74,10 +74,10 @@ Linux: distribución con glibc (no Alpine) y OpenSSL. **¿Prefieres compilarlo?*
 instalar git, .NET 10 y un compilador nativo ([prerrequisitos](docs/BUILD.md)):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/main/build.sh | bash      # Debian/Ubuntu
+curl -fsSL https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/master/build.sh | bash      # Debian/Ubuntu
 ```
 ```powershell
-irm https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/main/build.ps1 | iex            # Windows
+irm https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/master/build.ps1 | iex            # Windows
 ```
 
 Más opciones (macOS, sin compilador nativo, Arch, SteamOS) en **[docs/BUILD.md](docs/BUILD.md)**.

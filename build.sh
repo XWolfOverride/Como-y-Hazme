@@ -2,7 +2,7 @@
 #
 # como / hazme — autocompilación NativeAOT para Debian, Ubuntu y derivadas.
 #
-#   curl -fsSL https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/main/build.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/master/build.sh | bash
 #
 # Qué hace:
 #   1. Comprueba que están instaladas las herramientas necesarias (NO instala nada).

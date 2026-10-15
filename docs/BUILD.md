@@ -48,11 +48,11 @@ Comprueba que tienes las herramientas (**no instala nada**), descarga la última
 NativeAOT y deja los binarios en `Como-y-Hazme/`, indicando cómo instalarlos. Vuelve a ejecutarlo para actualizar.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/main/build.sh | bash     # Debian/Ubuntu
-wget -qO- https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/main/build.sh | bash      # (con wget)
+curl -fsSL https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/master/build.sh | bash     # Debian/Ubuntu
+wget -qO- https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/master/build.sh | bash      # (con wget)
 ```
 ```powershell
-irm https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/main/build.ps1 | iex           # Windows
+irm https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/master/build.ps1 | iex           # Windows
 ```
 
 > Ejecutar un script descargado requiere confiar en él: léelo antes en [`build.sh`](../build.sh) /
