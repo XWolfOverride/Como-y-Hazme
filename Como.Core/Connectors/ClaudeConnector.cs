@@ -95,7 +95,7 @@ public sealed class ClaudeConnector : IAiConnector
                         yield return chunk;
                     break;
                 case "error":
-                    throw new ConnectorException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del conector");
+                    throw new ConnectorException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del servicio de IA");
                 case "message_stop":
                     yield break;
             }

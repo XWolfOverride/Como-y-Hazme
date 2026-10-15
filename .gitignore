@@ -32,7 +32,7 @@ publish/
 ._*
 
 # Custom folder icons
-Icon
+Icon
 
 # Volume root files
 .DocumentRevisions-V100
@@ -104,3 +104,7 @@ x86/
 
 # Publish Web Output
 *.[Pp]ublish.xml
+# Binarios generados por build.sh / build.ps1
+/como.exe
+/hazme.exe
+/publish/

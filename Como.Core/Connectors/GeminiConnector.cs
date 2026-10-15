@@ -103,7 +103,7 @@ public sealed class GeminiConnector : IAiConnector
             var root = doc.RootElement;
 
             if (root.TryGetProperty("error", out _))
-                throw new ConnectorException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del conector");
+                throw new ConnectorException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del servicio de IA");
 
             if (!root.TryGetProperty("candidates", out var cands) || cands.GetArrayLength() == 0) continue;
             if (!cands[0].TryGetProperty("content", out var content)

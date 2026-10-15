@@ -48,7 +48,7 @@ public static class HttpUtil
             catch (HttpRequestException e)
             {
                 if (attempt >= MaxRetries)
-                    throw new ConnectorException($"No se pudo conectar con el conector: {e.Message}");
+                    throw new ConnectorException($"No se pudo conectar con el servicio de IA: {e.Message}");
                 reason = "Fallo de conexión";
             }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested)

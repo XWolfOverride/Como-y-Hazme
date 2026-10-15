@@ -141,7 +141,7 @@ internal sealed class ClaudeChat(IAiConnector connector, ISettings settings) : I
                     break;
                 }
                 case "error":
-                    throw new ConnectorException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del conector");
+                    throw new ConnectorException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del servicio de IA");
                 case "message_stop":
                     done = true;
                     break;

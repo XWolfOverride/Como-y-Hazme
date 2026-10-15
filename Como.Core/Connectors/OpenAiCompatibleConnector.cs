@@ -104,7 +104,7 @@ public abstract class OpenAiCompatibleConnector : IAiConnector
             var root = doc.RootElement;
 
             if (root.TryGetProperty("error", out _))
-                throw new ConnectorException(HttpUtil.ExtractError(json) ?? "Error desconocido del conector");
+                throw new ConnectorException(HttpUtil.ExtractError(json) ?? "Error desconocido del servicio de IA");
 
             if (!root.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0) continue;
             if (choices[0].TryGetProperty("delta", out var delta)

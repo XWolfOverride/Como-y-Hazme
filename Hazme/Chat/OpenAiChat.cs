@@ -118,7 +118,7 @@ internal sealed class OpenAiChat(IAiConnector connector, ISettings settings) : I
             var root = doc.RootElement;
 
             if (root.TryGetProperty("error", out _))
-                throw new ConnectorException(HttpUtil.ExtractError(json) ?? "Error desconocido del conector");
+                throw new ConnectorException(HttpUtil.ExtractError(json) ?? "Error desconocido del servicio de IA");
 
             if (!root.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0) continue;
             if (!choices[0].TryGetProperty("delta", out var delta)) continue;
