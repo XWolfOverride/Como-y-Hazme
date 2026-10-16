@@ -142,7 +142,7 @@ internal sealed class Interaction
     }
 
     /// <summary>Lee una línea del usuario. Devuelve null si pulsa Esc, Ctrl-C o no hay entrada.</summary>
-    public string? ReadLine()
+    public string? ReadLine(bool escCancelsJob = true)
     {
         if (!Interactive) return Console.ReadLine();
 
@@ -161,7 +161,8 @@ internal sealed class Interaction
             switch (k.Key)
             {
                 case ConsoleKey.Escape:
-                    _job.Cancel();
+                    if (escCancelsJob) _job.Cancel();
+                    Console.WriteLine();
                     return null;
                 case ConsoleKey.Enter:
                     Console.WriteLine();

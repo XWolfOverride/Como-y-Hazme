@@ -9,7 +9,8 @@ public sealed record ConfigKey(
     string? Default = null,
     bool Secret = false,
     string? EnvVar = null,
-    Func<string, string?>? Validate = null)
+    Func<string, string?>? Validate = null,
+    Func<string, string?>? Warn = null)
 {
     public static string FullName(string connectorId, string name) => $"{connectorId}.{name}";
 

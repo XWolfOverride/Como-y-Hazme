@@ -203,6 +203,12 @@ public static class CliCommon
         ConsoleUi.Write(key.FullName, ConsoleColor.Cyan);
         ConsoleUi.Write(" guardada con el valor ", ConsoleColor.Green);
         ConsoleUi.WriteLine(shown, ConsoleColor.White);
+
+        if (key.Key.Warn?.Invoke(value) is { } warning)
+        {
+            Console.WriteLine();
+            ConsoleUi.WriteLine(warning, ConsoleColor.Red);
+        }
         return 0;
     }
 }

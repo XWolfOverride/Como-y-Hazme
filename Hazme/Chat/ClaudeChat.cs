@@ -33,7 +33,18 @@ internal sealed class ClaudeChat(IAiConnector connector, ISettings settings) : I
             w.WriteString("model", model);
             w.WriteNumber("max_tokens", maxTokens);
             w.WriteBoolean("stream", true);
-            w.WriteString("system", request.SystemPrompt);
+
+            // Caché de prompt: las herramientas y el system prompt son idénticos en cada paso del bucle,
+            // así que se cachean (menos coste y latencia). Gemini y OpenAI cachean implícitamente.
+            w.WriteStartArray("system");
+            w.WriteStartObject();
+            w.WriteString("type", "text");
+            w.WriteString("text", request.SystemPrompt);
+            w.WriteStartObject("cache_control");
+            w.WriteString("type", "ephemeral");
+            w.WriteEndObject();
+            w.WriteEndObject();
+            w.WriteEndArray();
 
             if (request.Tools.Count > 0)
             {

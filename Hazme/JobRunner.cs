@@ -14,18 +14,33 @@ namespace Hazme;
 /// </summary>
 internal sealed class JobRunner(
     IChatClient chat, SettingsStore settings, Interaction interaction, ShellRunner shell,
-    bool confirmAllChanges, CancellationToken ct)
+    bool confirmAllChanges, bool planRequired, bool unattended, bool lessSafe, CancellationToken ct)
 {
+    // Con plan previo se exigen como máximo estos pasos: planes más largos se trocean en tramos.
+    private const int MaxPlanSteps = 7;
+
     private const ConsoleColor NarrationColor = ConsoleColor.Yellow;
     private const ConsoleColor CommandColor = ConsoleColor.Green;
     private const ConsoleColor InfoColor = ConsoleColor.Cyan;
+
+    // Conversación completa: se conserva entre peticiones de la sesión para no re-analizar.
+    private readonly List<ChatMessage> history = [];
+    private ChatRequest? request;
+
+    // Con plan previo, nada que modifique el sistema se ejecuta hasta que el usuario aprueba un plan.
+    private bool planApproved;
 
     private static readonly IReadOnlyList<ToolSpec> Tools =
     [
         new("run_command",
             "Run a shell command on the user's machine and return its exit code, stdout and stderr. " +
-            "Each call uses a fresh shell; 'cd' does not persist between calls.",
-            """{"type":"object","properties":{"command":{"type":"string","description":"The command line to run"},"cwd":{"type":"string","description":"Working directory (optional, defaults to the current directory)"}},"required":["command"]}"""),
+            "Each call uses a fresh shell; 'cd' does not persist between calls. " +
+            "Set read_only=true for commands that only inspect (list, read, query): they can run during the analysis phase, before a plan is approved.",
+            """{"type":"object","properties":{"command":{"type":"string","description":"The command line to run"},"cwd":{"type":"string","description":"Working directory (optional, defaults to the current directory)"},"read_only":{"type":"boolean","description":"true only if the command does not modify anything"}},"required":["command"]}"""),
+        new("present_plan",
+            "Present your action plan to the user and wait for their decision (approve, revise or cancel). " +
+            "Call it after analysing and BEFORE any change. Until the user approves, modifying tools are blocked.",
+            """{"type":"object","properties":{"summary":{"type":"string","description":"One or two sentences: what you found and what you will do"},"steps":{"type":"array","items":{"type":"string"},"description":"Ordered, concrete steps (commands or file changes)"},"risks":{"type":"string","description":"Optional: what could go wrong or be hard to undo"}},"required":["summary","steps"]}"""),
         new("read_file",
             "Read a text file and return its contents (truncated if very large). Use start_line/max_lines to read a section of a big file.",
             """{"type":"object","properties":{"path":{"type":"string","description":"File path"},"start_line":{"type":"integer","description":"First line to read (1-based, optional)"},"max_lines":{"type":"integer","description":"Maximum number of lines to return (optional)"}},"required":["path"]}"""),
@@ -49,18 +64,47 @@ internal sealed class JobRunner(
             """{"type":"object","properties":{"question":{"type":"string","description":"The question"}},"required":["question"]}"""),
     ];
 
+    /// <summary>
+    /// Sesión: ejecuta la tarea y, con terminal interactivo, deja la conversación abierta para
+    /// nuevas instrucciones (la IA conserva todo lo analizado). Enter vacío o Esc la cierran.
+    /// </summary>
     public async Task<int> RunAsync(string task)
     {
+        var tools = planRequired ? Tools : Tools.Where(t => t.Name != "present_plan").ToList();
+        request = new ChatRequest(BuildSystemPrompt(), tools);
+
+        var code = await RunTurnAsync(task);
+
+        // Con -y (uso en scripts) no hay conversación posterior: termina al acabar la tarea.
+        while (code == 0 && interaction.Interactive && !unattended)
+        {
+            Console.WriteLine();
+            ConsoleUi.WriteLine("Escribe otra instrucción para continuar en esta conversación (Enter o Esc para salir).",
+                ConsoleColor.DarkGray);
+            ConsoleUi.Write("› ", ConsoleColor.White);
+
+            var next = interaction.ReadLine(escCancelsJob: false);
+            if (ct.IsCancellationRequested) break;
+            if (string.IsNullOrWhiteSpace(next) || next.Trim().ToLowerInvariant() is "salir" or "exit" or "quit") break;
+
+            code = await RunTurnAsync(next);
+        }
+        return code;
+    }
+
+    /// <summary>Una petición del usuario: bucle de herramientas hasta que la IA termina.</summary>
+    private async Task<int> RunTurnAsync(string userText)
+    {
         var maxSteps = Math.Max(1, KnownKeys.IntValue(settings, HazmeKeys.MaxSteps, 30));
-        var request = new ChatRequest(BuildSystemPrompt(), Tools);
-        var history = new List<ChatMessage> { new(ChatRole.User, task) };
+        history.Add(new ChatMessage(ChatRole.User, userText));
+        planApproved = !planRequired;
         var lineStart = true;
 
         for (var step = 0; step < maxSteps; step++)
         {
             ct.ThrowIfCancellationRequested();
 
-            var turn = await chat.ChatAsync(history, request, chunk =>
+            var turn = await chat.ChatAsync(history, request!, chunk =>
             {
                 ConsoleUi.Write(chunk, NarrationColor);
                 lineStart = chunk.EndsWith('\n');
@@ -114,10 +158,19 @@ internal sealed class JobRunner(
         using (doc)
         {
             var a = doc.RootElement;
+
+            // Plan previo: lo que modifica queda bloqueado hasta que el usuario apruebe un plan.
+            if (planRequired && !planApproved && IsMutating(call.Name, a))
+                return Fail(call,
+                    "Blocked: there is no approved plan yet. Finish the read-only analysis, then call present_plan " +
+                    "and wait for the user's approval before changing anything.");
+
             switch (call.Name)
             {
+                case "present_plan":
+                    return await PresentPlanAsync(call, Str(a, "summary"), StrList(a, "steps"), Str(a, "risks"));
                 case "run_command":
-                    return await RunCommandAsync(call, Str(a, "command"), Str(a, "cwd"));
+                    return await RunCommandAsync(call, Str(a, "command"), Str(a, "cwd"), IsReadOnlyCommand(a));
                 case "read_file":
                     return ReadFile(call, Str(a, "path"), Int(a, "start_line"), Int(a, "max_lines"));
                 case "list_dir":
@@ -136,9 +189,97 @@ internal sealed class JobRunner(
         }
     }
 
+    // ---------- plan previo ----------
+
+    private static bool IsMutating(string tool, JsonElement args) => tool switch
+    {
+        "write_file" or "propose_change" => true,
+        "run_command" => !IsReadOnlyCommand(args),
+        _ => false,
+    };
+
+    /// <summary>
+    /// Es la IA quien decide si un comando es de solo lectura (y, por tanto, puede ejecutarse durante
+    /// el análisis). La aplicación no lo discute; el usuario sigue viendo cada comando antes de que corra.
+    /// </summary>
+    private static bool IsReadOnlyCommand(JsonElement args) =>
+        args.ValueKind == JsonValueKind.Object
+        && args.TryGetProperty("read_only", out var ro) && ro.ValueKind == JsonValueKind.True;
+
+    private async Task<ToolResult> PresentPlanAsync(ToolCall call, string? summary, List<string> steps, string? risks)
+    {
+        if (steps.Count > MaxPlanSteps)
+            return Fail(call,
+                $"The plan has {steps.Count} steps; a plan must have at most {MaxPlanSteps}. Split the work into phases: " +
+                "present only the first phase now, and present the next one when it is done.");
+
+        Console.WriteLine();
+        ConsoleUi.WriteLine("▌ Plan de acción", ConsoleColor.Magenta);
+        if (!string.IsNullOrWhiteSpace(summary)) ConsoleUi.WriteLine("  " + summary, NarrationColor);
+        for (var i = 0; i < steps.Count; i++)
+            ConsoleUi.WriteLine($"  {i + 1}. {steps[i]}", ConsoleColor.White);
+        if (!string.IsNullOrWhiteSpace(risks))
+        {
+            ConsoleUi.Write("  Riesgos: ", ConsoleColor.Red);
+            ConsoleUi.WriteLine(risks, ConsoleColor.Red);
+        }
+
+        if (unattended)
+        {
+            planApproved = true;
+            ConsoleUi.WriteLine("  ✔ plan aprobado automáticamente (-y)", ConsoleColor.Green);
+            return new ToolResult(call.Id, call.Name,
+                "Plan auto-approved (unattended mode). Execute it now. If something unexpected comes up, stop and report.");
+        }
+
+        if (!interaction.Interactive)
+            return Fail(call, "Cannot ask for approval without an interactive terminal. The user must run hazme with -y or -no-plan.");
+
+        while (true)
+        {
+            Console.WriteLine();
+            ConsoleUi.Write("[A]", ConsoleColor.Green);
+            ConsoleUi.Write("probar  ", ConsoleColor.Gray);
+            ConsoleUi.Write("[M]", ConsoleColor.Cyan);
+            ConsoleUi.Write("odificar  ", ConsoleColor.Gray);
+            ConsoleUi.Write("[C]", ConsoleColor.Red);
+            ConsoleUi.WriteLine("ancelar   (Esc aborta el trabajo)", ConsoleColor.Gray);
+
+            var choice = interaction.ReadChoice("amc");
+            ct.ThrowIfCancellationRequested();
+
+            switch (choice)
+            {
+                case 'a':
+                    planApproved = true;
+                    ConsoleUi.WriteLine("  ✔ plan aprobado", ConsoleColor.Green);
+                    return new ToolResult(call.Id, call.Name,
+                        "The user APPROVED the plan. Execute it now without asking again for each step. " +
+                        "If something unexpected comes up, stop and report instead of improvising big changes.");
+
+                case 'm':
+                    ConsoleUi.Write("instrucciones › ", ConsoleColor.White);
+                    var text = interaction.ReadLine();
+                    ct.ThrowIfCancellationRequested();
+                    if (string.IsNullOrWhiteSpace(text)) continue;
+                    return new ToolResult(call.Id, call.Name,
+                        "The user did NOT approve the plan and asks for changes: " + text +
+                        "\nPresent a revised plan with present_plan.");
+
+                case 'c':
+                    ConsoleUi.WriteLine("  ✖ plan cancelado", ConsoleColor.Red);
+                    return new ToolResult(call.Id, call.Name,
+                        "The user CANCELLED the plan. Make no changes; briefly say what you found and stop.");
+
+                default:
+                    return Fail(call, "No choice was made; nothing was executed.");
+            }
+        }
+    }
+
     // ---------- herramientas ----------
 
-    private async Task<ToolResult> RunCommandAsync(ToolCall call, string? command, string? cwd)
+    private async Task<ToolResult> RunCommandAsync(ToolCall call, string? command, string? cwd, bool readOnly)
     {
         if (string.IsNullOrWhiteSpace(command)) return Fail(call, "Missing 'command'.");
 
@@ -147,7 +288,8 @@ internal sealed class JobRunner(
         ConsoleUi.WriteLine(command, CommandColor);
         if (!string.IsNullOrWhiteSpace(cwd)) ConsoleUi.WriteLine($"  en {cwd}", ConsoleColor.DarkGray);
 
-        await GraceAsync();
+        // Los comandos de solo lectura (fase de análisis) no esperan: se ven pero no se retrasan.
+        if (!(planRequired && readOnly)) await GraceAsync();
 
         var res = await shell.RunAsync(command, cwd);
         if (!Console.IsOutputRedirected || res.Stdout.Length + res.Stderr.Length > 0) Console.WriteLine();
@@ -178,6 +320,13 @@ internal sealed class JobRunner(
         {
             var full = FileTools.Resolve(path);
             if (!File.Exists(full)) return Fail(call, $"File not found: {path}");
+
+            // Datos privados (claves, credenciales, .env...): solo con permiso explícito del usuario.
+            if (FileTools.IsPrivatePath(full) && !AllowPrivateRead(path))
+                return Fail(call,
+                    "The user did not allow reading this private file. Do not try to access it by other means; " +
+                    "continue without it or ask the user.");
+
             if (FileTools.LooksBinary(full))
                 return Fail(call, $"Binary file ({FileTools.FormatSize(new FileInfo(full).Length)}); not shown.");
 
@@ -199,6 +348,34 @@ internal sealed class JobRunner(
         {
             return Fail(call, e.Message);
         }
+    }
+
+    private bool AllowPrivateRead(string path)
+    {
+        // Modo menos seguro: el usuario ha asumido la responsabilidad; no se pregunta.
+        if (lessSafe) return true;
+
+        // Sin nadie que responda (-y o sin terminal), por prudencia no se leen archivos privados.
+        if (unattended)
+        {
+            ConsoleUi.WriteLine($"  ⚠ lectura de archivo privado denegada en modo desatendido: {path}", ConsoleColor.Red);
+            return false;
+        }
+
+        Console.WriteLine();
+        ConsoleUi.Write("⚠ La IA quiere leer un archivo que puede contener datos privados: ", ConsoleColor.Red);
+        ConsoleUi.WriteLine(path, ConsoleColor.White);
+        ConsoleUi.WriteLine("  Su contenido se enviaría al servicio de IA.", ConsoleColor.Gray);
+        if (!interaction.Interactive) return false;
+
+        ConsoleUi.Write("[P]", ConsoleColor.Green);
+        ConsoleUi.Write("ermitir  ", ConsoleColor.Gray);
+        ConsoleUi.Write("[N]", ConsoleColor.Red);
+        ConsoleUi.WriteLine("o (por defecto)   (Esc aborta el trabajo)", ConsoleColor.Gray);
+
+        var choice = interaction.ReadChoice("pn");
+        ct.ThrowIfCancellationRequested();
+        return choice == 'p';
     }
 
     private ToolResult ListDir(ToolCall call, string path, int maxDepth)
@@ -302,8 +479,25 @@ internal sealed class JobRunner(
                 ConsoleUi.WriteLine("  … (diff truncado en pantalla)", ConsoleColor.DarkGray);
         }
 
+        // Modo desatendido (-y): se muestra el diff y se aplica tras el tiempo de gracia, sin preguntar.
+        if (unattended)
+        {
+            await GraceAsync();
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+                await File.WriteAllTextAsync(full, content, new UTF8Encoding(false), ct);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                return Fail(call, e.Message);
+            }
+            ConsoleUi.WriteLine("  ✔ aplicado (-y)", ConsoleColor.Green);
+            return new ToolResult(call.Id, call.Name, current is null ? $"Created {path}" : $"Applied change to {path}");
+        }
+
         if (!interaction.Interactive)
-            return Fail(call, "Cannot ask for confirmation without an interactive terminal; the change was not applied.");
+            return Fail(call, "Cannot ask for confirmation without an interactive terminal; the change was not applied. Run hazme with -y to apply changes unattended.");
 
         while (true)
         {
@@ -408,8 +602,10 @@ internal sealed class JobRunner(
     /// </summary>
     private async Task GraceAsync()
     {
-        var seconds = KnownKeys.IntValue(settings, HazmeKeys.GraceSeconds, 3);
-        if (seconds <= 0 || !interaction.Interactive) return;
+        var seconds = KnownKeys.IntValue(settings, HazmeKeys.GraceSeconds, 5);
+        if (seconds <= 0) return;
+        // Sin terminal solo se espera en modo desatendido (-y), que mantiene los tiempos de gracia.
+        if (!interaction.Interactive && !unattended) return;
 
         var show = !Console.IsOutputRedirected;
         var end = DateTime.UtcNow.AddSeconds(seconds);
@@ -435,6 +631,16 @@ internal sealed class JobRunner(
             ? v.GetString()
             : null;
 
+    private static List<string> StrList(JsonElement obj, string name)
+    {
+        var list = new List<string>();
+        if (obj.ValueKind == JsonValueKind.Object && obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Array)
+            foreach (var item in v.EnumerateArray())
+                if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } s)
+                    list.Add(s);
+        return list;
+    }
+
     private static int? Int(JsonElement obj, string name) =>
         obj.ValueKind == JsonValueKind.Object && obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number
             && v.TryGetInt32(out var n)
@@ -446,9 +652,36 @@ internal sealed class JobRunner(
         var shellName = OperatingSystem.IsWindows()
             ? "PowerShell"
             : Path.GetFileName(Environment.GetEnvironmentVariable("SHELL") ?? "sh");
+
+        var sessionBlock = unattended
+            ? """
+              UNATTENDED MODE (-y): nobody will answer questions or approve anything. Never ask for confirmation; decide sensibly on your own and use ask_user only if it is impossible to continue. Plans and diffs are applied automatically, so be careful and conservative with destructive operations.
+              """
+            : "The conversation stays open after you finish, so the user may continue with follow-up requests; reuse what you already learned instead of re-analysing.";
+
+        var privacyBlock = lessSafe
+            ? """
+              Privacy: the user enabled LESS-SAFE mode and accepted the risk of sharing private data with the AI service. You may read any file the task needs, including private ones, without asking. Still, do not print or copy secrets (keys, tokens, passwords) into files, commands or messages unless the task requires it.
+              """
+            : """
+              Privacy:
+              - Avoid accessing private or sensitive data: credentials, API keys, tokens, private keys, .env files, password stores, browser profiles, SSH/GPG material, personal documents. Everything you read is sent to an external AI service.
+              - Only touch such data if it is strictly necessary and the user clearly asked for it. Prefer checks that do not reveal secrets (e.g. check a file exists instead of printing it). Never print, copy or write secrets into files, commands or your messages.
+              """;
+
         return $"""
             You are "hazme", an agent that performs tasks on the user's computer from the command line, using tools.
             Environment: {RuntimeInformation.OSDescription}; shell: {shellName}; user: {Environment.UserName}; current directory: {Environment.CurrentDirectory}.
+
+            Workflow (follow it by default):
+            1. ANALYSE: understand the situation using only read-only tools (list_dir, read_file, stat_path, and run_command with read_only=true). Change nothing.
+            2. PLAN: if the task requires changing anything, call present_plan with a concise summary and concrete ordered steps (mention risks). Until it is approved, modifying tools are blocked.
+               Keep plans SMALL: at most {MaxPlanSteps} short steps that the user can take in at a glance. If the job needs more, split it into phases: present and execute only the first phase, then present the next one when it is done. Never present a long plan.
+            3. EXECUTE: once approved, carry out the plan without asking again for each step. If something unexpected happens, stop and report instead of improvising big changes.
+            If the task needs no changes (a question, an explanation, a report), just answer: no plan is needed.
+            Mark a run_command as read_only=true ONLY when you are sure it changes nothing (including side effects such as installing, writing files, network writes or starting services). You decide what is safe or dangerous: when in doubt, it is not read-only.
+            {sessionBlock}
+            {privacyBlock}
 
             Rules:
             - Work step by step. Before acting, say in one short sentence what you are about to do. Keep all text brief and plain (no markdown).

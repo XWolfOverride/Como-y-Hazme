@@ -34,17 +34,21 @@ $ hazme un proyecto de consola dotnet en la carpeta demo y compílalo
 Voy a crear el proyecto de consola.
 
 $ dotnet new console -o demo
-  ejecutando en 3s · Esc para abortar
+  ejecutando en 5s · Esc para abortar
 ...
 Listo: el proyecto está creado en ./demo y compila sin errores.
 ```
 
-La IA propone un paso, se ejecuta, ve el resultado y decide el siguiente, hasta completar la tarea.
+Por defecto sigue un flujo prudente: **analiza** (solo lectura) → te muestra un **plan de acción** →
+tú **apruebas, modificas o cancelas** → **ejecuta**. Después la **conversación sigue abierta**: puedes
+pedirle más cosas y reutiliza lo que ya analizó (Enter o Esc para salir). Los planes son cortos: si el
+trabajo es grande, se divide en **fases** que apruebas una a una. `-no-plan` lo desactiva.
 Herramientas internas: lanzar comandos, listar en árbol, leer, comprobar si existe, escribir y proponer
 cambios con **diff**.
 
 **Control sin interrupciones constantes:**
 
+- Nada que modifique el sistema se ejecuta **hasta que apruebas el plan**.
 - Cada comando se **muestra antes de ejecutarse**, con unos segundos de gracia. **Esc** aborta el trabajo en cualquier momento.
 - **Ctrl-C** interrumpe el comando en curso (dos veces, lo mata); la IA lo sabe y pregunta si continúa.
 - Escribe + Enter para **dar una nota** a la IA mientras trabaja.
@@ -113,10 +117,13 @@ Para no dejar la clave en el historial, usa la variable de entorno del conector 
 | `-connector <id>` | Usa otro conector **solo en esta llamada** |
 | `-no-color` | Sin colores en esta llamada (o `set no-color true`; también respeta `NO_COLOR`) |
 | `-confirm` | Solo `hazme`: confirma con diff toda escritura de archivos |
+| `-no-plan` | Solo `hazme`: sin plan previo, la IA actúa directamente (o `set plan false`) |
+| `-less-safe` | Solo `hazme`: **modo menos seguro** en esta llamada, lee archivos privados sin preguntar (o `set less-safe true`) |
+| `-y` | Solo `hazme`, **desatendido** (scripts): no pide confirmaciones de plan ni de diffs, **mantiene los tiempos de gracia** de los comandos y termina al acabar. No lee archivos privados |
 
 Las opciones pueden ir en cualquier posición. Claves: `connector`, `no-color`, `<conector>.api-key`,
-`<conector>.model`, `<conector>.base-url`; y de `hazme`: `grace-seconds` (3), `max-steps` (30), `shell`,
-`confirm-changes` (false). Tu configuración conserva las claves que cada herramienta no conoce.
+`<conector>.model`, `<conector>.base-url`; y de `hazme`: `plan` (true), `less-safe` (false), `grace-seconds` (5), `max-steps` (30),
+`shell`, `confirm-changes` (false). Tu configuración conserva las claves que cada herramienta no conoce.
 
 ### Conectores
 
@@ -133,13 +140,22 @@ solución de problemas en **[docs/CONFIG.md](docs/CONFIG.md)**.
 ## Advertencias
 
 > [!CAUTION]
-> **Modelos pequeños con `hazme`: riesgo real.** `hazme` ejecuta comandos y escribe archivos con tus
-> permisos. Los modelos **pequeños, gratuitos o locales** inventan rutas, malinterpretan la tarea, ignoran
-> la cautela y pueden lanzar operaciones destructivas. Esc y el tiempo de gracia **no deshacen** lo ya
-> ejecutado. Usa un modelo de primera línea con `hazme`; con uno pequeño, usa `como`, o prueba en una
-> carpeta desechable o una máquina virtual.
+> **MODELOS PEQUEÑOS CON `hazme`: RIESGO REAL DE PÉRDIDA DE DATOS.** `hazme` ejecuta comandos y escribe
+> archivos con tus permisos. Los modelos **pequeños, gratuitos o locales** inventan rutas, malinterpretan la
+> tarea, ignoran la cautela y pueden **borrar o sobrescribir lo que no debían**. Esc y el tiempo de gracia
+> **no deshacen** lo ya ejecutado.
+>
+> - Usa un modelo de primera línea con `hazme`. Con uno pequeño, usa **`como`**.
+> - Si aun así lo pruebas, hazlo en una **carpeta desechable o una máquina virtual**, con copias de seguridad.
+> - `hazme` te lo recuerda: pide **aceptar los riesgos** la primera vez y **avisa en cada ejecución** si el
+>   modelo parece pequeño.
 
 - `hazme` **no tiene sandbox** y envía al servicio de IA el contenido de los archivos que lee y la salida de los comandos.
+  Se le indica que evite datos privados (claves, `.env`, credenciales...) y **pide tu permiso** antes de leer
+  archivos de ese tipo, pero no es infalible: no lo uses con información sensible.
+- **Modo menos seguro** (`hazme -set less-safe true` o `-less-safe` en una llamada): la IA lee archivos
+  privados **sin pedir permiso**. Es **decisión y responsabilidad tuya**; pensado para una IA local de
+  confianza. Avisa en rojo al activarlo y en cada ejecución.
 - Los niveles **gratuitos** suelen dar menos garantías de privacidad y tienen límites bajos.
 - **Lee siempre el comando** de `como` antes de ejecutarlo, sobre todo con `sudo` o si borra datos.
 
