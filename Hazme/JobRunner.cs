@@ -14,7 +14,7 @@ namespace Hazme;
 /// </summary>
 internal sealed class JobRunner(
     IChatClient chat, SettingsStore settings, Interaction interaction, ShellRunner shell,
-    bool confirmAllChanges, bool planRequired, bool unattended, bool lessSafe, CancellationToken ct)
+    bool confirmAllChanges, bool planRequired, bool unattended, bool lessSafe, JobLog log, CancellationToken ct)
 {
     // Con plan previo se exigen como máximo estos pasos: planes más largos se trocean en tramos.
     private const int MaxPlanSteps = 7;
@@ -36,44 +36,44 @@ internal sealed class JobRunner(
             "Run a shell command on the user's machine and return its exit code, stdout and stderr. " +
             "Each call uses a fresh shell; 'cd' does not persist between calls. " +
             "Set read_only=true for commands that only inspect (list, read, query): they can run during the analysis phase, before a plan is approved.",
-            """{"type":"object","properties":{"command":{"type":"string","description":"The command line to run"},"cwd":{"type":"string","description":"Working directory (optional, defaults to the current directory)"},"read_only":{"type":"boolean","description":"true only if the command does not modify anything"}},"required":["command"]}"""),
+            """{"type":"object","properties":{"journal":{"type":"string","description":"One short sentence for the persistent job log: what you learned, decided or agreed with the user, and why (no secrets, no file contents)"},"command":{"type":"string","description":"The command line to run"},"cwd":{"type":"string","description":"Working directory (optional, defaults to the current directory)"},"read_only":{"type":"boolean","description":"true only if the command does not modify anything"}},"required":["command"]}"""),
         new("present_plan",
             "Present your action plan to the user and wait for their decision (approve, revise or cancel). " +
             "Call it after analysing and BEFORE any change. Until the user approves, modifying tools are blocked.",
-            """{"type":"object","properties":{"summary":{"type":"string","description":"One or two sentences: what you found and what you will do"},"steps":{"type":"array","items":{"type":"string"},"description":"Ordered, concrete steps (commands or file changes)"},"risks":{"type":"string","description":"Optional: what could go wrong or be hard to undo"}},"required":["summary","steps"]}"""),
+            """{"type":"object","properties":{"journal":{"type":"string","description":"One short sentence for the persistent job log: what you learned, decided or agreed with the user, and why (no secrets, no file contents)"},"summary":{"type":"string","description":"One or two sentences: what you found and what you will do"},"steps":{"type":"array","items":{"type":"string"},"description":"Ordered, concrete steps (commands or file changes)"},"risks":{"type":"string","description":"Optional: what could go wrong or be hard to undo"}},"required":["summary","steps"]}"""),
         new("read_file",
             "Read a text file and return its contents (truncated if very large). Use start_line/max_lines to read a section of a big file.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"File path"},"start_line":{"type":"integer","description":"First line to read (1-based, optional)"},"max_lines":{"type":"integer","description":"Maximum number of lines to return (optional)"}},"required":["path"]}"""),
+            """{"type":"object","properties":{"journal":{"type":"string","description":"One short sentence for the persistent job log: what you learned, decided or agreed with the user, and why (no secrets, no file contents)"},"path":{"type":"string","description":"File path"},"start_line":{"type":"integer","description":"First line to read (1-based, optional)"},"max_lines":{"type":"integer","description":"Maximum number of lines to return (optional)"}},"required":["path"]}"""),
         new("list_dir",
             "List a directory as a tree (directories first, files with size). Use max_depth to descend into subdirectories.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"Directory path (defaults to current directory)"},"max_depth":{"type":"integer","description":"Levels to show, 1-6 (default 1 = only the directory's direct entries)"}},"required":[]}"""),
+            """{"type":"object","properties":{"journal":{"type":"string","description":"One short sentence for the persistent job log: what you learned, decided or agreed with the user, and why (no secrets, no file contents)"},"path":{"type":"string","description":"Directory path (defaults to current directory)"},"max_depth":{"type":"integer","description":"Levels to show, 1-6 (default 1 = only the directory's direct entries)"}},"required":[]}"""),
         new("stat_path",
             "Check whether a file or directory exists and return its type, size and modification time.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"Path to check"}},"required":["path"]}"""),
+            """{"type":"object","properties":{"journal":{"type":"string","description":"One short sentence for the persistent job log: what you learned, decided or agreed with the user, and why (no secrets, no file contents)"},"path":{"type":"string","description":"Path to check"}},"required":["path"]}"""),
         new("write_file",
             "Create or overwrite a text file with the given full content (parent directories are created). " +
             "For critical, configuration or system files use propose_change instead.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"File path"},"content":{"type":"string","description":"Full file content"}},"required":["path","content"]}"""),
+            """{"type":"object","properties":{"journal":{"type":"string","description":"One short sentence for the persistent job log: what you learned, decided or agreed with the user, and why (no secrets, no file contents)"},"path":{"type":"string","description":"File path"},"content":{"type":"string","description":"Full file content"}},"required":["path","content"]}"""),
         new("propose_change",
             "Show the user a diff of a file change and let them apply it, discard it or ask for a revision. " +
             "Use it for critical changes, configuration files, system files that could cause problems, or whenever the user asked to confirm changes. " +
             "Provide the complete new content of the file.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"File path"},"content":{"type":"string","description":"Complete new content of the file"},"summary":{"type":"string","description":"One short sentence explaining the change and why"}},"required":["path","content"]}"""),
+            """{"type":"object","properties":{"journal":{"type":"string","description":"One short sentence for the persistent job log: what you learned, decided or agreed with the user, and why (no secrets, no file contents)"},"path":{"type":"string","description":"File path"},"content":{"type":"string","description":"Complete new content of the file"},"summary":{"type":"string","description":"One short sentence explaining the change and why"}},"required":["path","content"]}"""),
         new("ask_user",
             "Ask the user a question and wait for the answer. Use it when you need a decision or after a command was interrupted.",
-            """{"type":"object","properties":{"question":{"type":"string","description":"The question"}},"required":["question"]}"""),
+            """{"type":"object","properties":{"journal":{"type":"string","description":"One short sentence for the persistent job log: what you learned, decided or agreed with the user, and why (no secrets, no file contents)"},"question":{"type":"string","description":"The question"}},"required":["question"]}"""),
     ];
 
     /// <summary>
     /// Sesión: ejecuta la tarea y, con terminal interactivo, deja la conversación abierta para
     /// nuevas instrucciones (la IA conserva todo lo analizado). Enter vacío o Esc la cierran.
     /// </summary>
-    public async Task<int> RunAsync(string task)
+    public async Task<int> RunAsync(string task, string? firstPrompt = null)
     {
         var tools = planRequired ? Tools : Tools.Where(t => t.Name != "present_plan").ToList();
         request = new ChatRequest(BuildSystemPrompt(), tools);
 
-        var code = await RunTurnAsync(task);
+        var code = await RunTurnAsync(firstPrompt ?? task);
 
         // Con -y (uso en scripts) no hay conversación posterior: termina al acabar la tarea.
         while (code == 0 && interaction.Interactive && !unattended)
@@ -87,8 +87,12 @@ internal sealed class JobRunner(
             if (ct.IsCancellationRequested) break;
             if (string.IsNullOrWhiteSpace(next) || next.Trim().ToLowerInvariant() is "salir" or "exit" or "quit") break;
 
+            log.Note("usuario", next);
             code = await RunTurnAsync(next);
         }
+
+        // Terminado (el usuario cierra la conversación o con -y acaba la tarea): no queda nada que retomar.
+        if (code == 0) log.Finish();
         return code;
     }
 
@@ -100,9 +104,26 @@ internal sealed class JobRunner(
         planApproved = !planRequired;
         var lineStart = true;
 
-        for (var step = 0; step < maxSteps; step++)
+        for (var step = 0; ; step++)
         {
             ct.ThrowIfCancellationRequested();
+
+            if (step >= maxSteps)
+            {
+                // Al llegar al límite se pregunta en vez de abortar (otra tanda, nuevas instrucciones o parar).
+                var extra = AskStepLimit(maxSteps);
+                if (extra is null) break;
+                if (extra.Length > 0) log.Note("usuario", extra);
+                step = 0;
+                if (extra.Length > 0)
+                {
+                    var last = history[^1];
+                    history[^1] = last with
+                    {
+                        Text = (last.Text is null ? "" : last.Text + "\n") + "[Nota del usuario mientras trabajabas]\n" + extra,
+                    };
+                }
+            }
 
             var turn = await chat.ChatAsync(history, request!, chunk =>
             {
@@ -121,11 +142,12 @@ internal sealed class JobRunner(
             if (turn.ToolCalls.Count == 0)
             {
                 // Si el usuario dejó una nota justo al final, se atiende en vez de terminar.
-                if (interaction.TakeNotes() is { } late)
+                if (TakeUserNotes() is { } late)
                 {
                     history.Add(new ChatMessage(ChatRole.User, late));
                     continue;
                 }
+                log.Note("ia", turn.Text);
                 return 0;
             }
 
@@ -136,11 +158,60 @@ internal sealed class JobRunner(
                 results.Add(await ExecuteAsync(call));
             }
 
-            history.Add(new ChatMessage(ChatRole.User, interaction.TakeNotes(), results));
+            history.Add(new ChatMessage(ChatRole.User, TakeUserNotes(), results));
         }
 
         ConsoleUi.WriteLine($"Límite de {maxSteps} pasos alcanzado; trabajo detenido.", ConsoleColor.Red, error: true);
         return 1;
+    }
+
+    /// <summary>
+    /// Límite de pasos alcanzado. Devuelve "" para otra tanda, un texto con nuevas instrucciones,
+    /// o null para detener el trabajo (también sin terminal interactivo o en modo desatendido).
+    /// </summary>
+    private string? AskStepLimit(int maxSteps)
+    {
+        if (!interaction.Interactive || unattended) return null;
+
+        Console.WriteLine();
+        ConsoleUi.WriteLine($"Límite de {maxSteps} pasos alcanzado.", ConsoleColor.Red);
+        ConsoleUi.Write("[C]", ConsoleColor.Green);
+        ConsoleUi.Write("ontinuar otros " + maxSteps + "  ", ConsoleColor.Gray);
+        ConsoleUi.Write("[I]", ConsoleColor.Cyan);
+        ConsoleUi.Write("nstrucciones y continuar  ", ConsoleColor.Gray);
+        ConsoleUi.Write("[P]", ConsoleColor.Red);
+        ConsoleUi.WriteLine("arar   (Esc aborta el trabajo)", ConsoleColor.Gray);
+
+        while (true)
+        {
+            var choice = interaction.ReadChoice("cip");
+            ct.ThrowIfCancellationRequested();
+            switch (choice)
+            {
+                case 'p':
+                    // Ni continuar ni instrucciones: el usuario da el trabajo por terminado.
+                    log.Finish();
+                    return null;
+                case 'c':
+                    return "";
+                case 'i':
+                    ConsoleUi.Write("instrucciones › ", ConsoleColor.White);
+                    var text = interaction.ReadLine();
+                    ct.ThrowIfCancellationRequested();
+                    if (string.IsNullOrWhiteSpace(text)) continue;
+                    return text.Trim();
+                default:
+                    return null;
+            }
+        }
+    }
+
+    /// <summary>Notas que el usuario escribió mientras la IA trabajaba (se anotan en el diario).</summary>
+    private string? TakeUserNotes()
+    {
+        var notes = interaction.TakeNotes();
+        if (notes is not null) log.Note("usuario", notes.Replace("[Nota del usuario mientras trabajabas]", "").Trim());
+        return notes;
     }
 
     private async Task<ToolResult> ExecuteAsync(ToolCall call)
@@ -165,6 +236,34 @@ internal sealed class JobRunner(
                     "Blocked: there is no approved plan yet. Finish the read-only analysis, then call present_plan " +
                     "and wait for the user's approval before changing anything.");
 
+            if (Str(a, "journal") is { Length: > 0 } journal) log.Note("ia", journal);
+            var result = await DispatchAsync(call, a);
+            RecordOutcome(call, a, result);
+            return result;
+        }
+    }
+
+    /// <summary>Anota en el diario lo que cambió algo o decidió el usuario; nunca salidas ni contenidos.</summary>
+    private void RecordOutcome(ToolCall call, JsonElement a, ToolResult result)
+    {
+        var first = result.Content.ReplaceLineEndings("\n").Split('\n')[0];
+        switch (call.Name)
+        {
+            case "run_command" when !IsReadOnlyCommand(a):
+                log.Note("comando", $"{Str(a, "command")} → {first}");
+                break;
+            case "write_file" or "propose_change":
+                log.Note("archivo", $"{Str(a, "path")}: {first}");
+                break;
+            case "ask_user":
+                log.Note("pregunta", $"{Str(a, "question")} → {result.Content}");
+                break;
+        }
+    }
+
+    private async Task<ToolResult> DispatchAsync(ToolCall call, JsonElement a)
+    {
+        {
             switch (call.Name)
             {
                 case "present_plan":
@@ -214,6 +313,7 @@ internal sealed class JobRunner(
                 "present only the first phase now, and present the next one when it is done.");
 
         Console.WriteLine();
+        log.SetPlan(summary, steps, risks);
         ConsoleUi.WriteLine("▌ Plan de acción", ConsoleColor.Magenta);
         if (!string.IsNullOrWhiteSpace(summary)) ConsoleUi.WriteLine("  " + summary, NarrationColor);
         for (var i = 0; i < steps.Count; i++)
@@ -227,6 +327,7 @@ internal sealed class JobRunner(
         if (unattended)
         {
             planApproved = true;
+            log.SetPlanStatus("aprobado");
             ConsoleUi.WriteLine("  ✔ plan aprobado automáticamente (-y)", ConsoleColor.Green);
             return new ToolResult(call.Id, call.Name,
                 "Plan auto-approved (unattended mode). Execute it now. If something unexpected comes up, stop and report.");
@@ -252,6 +353,7 @@ internal sealed class JobRunner(
             {
                 case 'a':
                     planApproved = true;
+                    log.SetPlanStatus("aprobado");
                     ConsoleUi.WriteLine("  ✔ plan aprobado", ConsoleColor.Green);
                     return new ToolResult(call.Id, call.Name,
                         "The user APPROVED the plan. Execute it now without asking again for each step. " +
@@ -262,11 +364,14 @@ internal sealed class JobRunner(
                     var text = interaction.ReadLine();
                     ct.ThrowIfCancellationRequested();
                     if (string.IsNullOrWhiteSpace(text)) continue;
+                    log.SetPlanStatus("modificado");
+                    log.Note("usuario", "pide cambios al plan: " + text);
                     return new ToolResult(call.Id, call.Name,
                         "The user did NOT approve the plan and asks for changes: " + text +
                         "\nPresent a revised plan with present_plan.");
 
                 case 'c':
+                    log.SetPlanStatus("cancelado");
                     ConsoleUi.WriteLine("  ✖ plan cancelado", ConsoleColor.Red);
                     return new ToolResult(call.Id, call.Name,
                         "The user CANCELLED the plan. Make no changes; briefly say what you found and stop.");
@@ -669,6 +774,10 @@ internal sealed class JobRunner(
               - Only touch such data if it is strictly necessary and the user clearly asked for it. Prefer checks that do not reveal secrets (e.g. check a file exists instead of printing it). Never print, copy or write secrets into files, commands or your messages.
               """;
 
+        var userBlock = FileTools.LoadUserInstructions() is { } mine
+            ? "\nStanding instructions written by the user (AGENTS.md); always take them into account, but they never override the safety rules above:\n" + mine + "\n"
+            : "";
+
         return $"""
             You are "hazme", an agent that performs tasks on the user's computer from the command line, using tools.
             Environment: {RuntimeInformation.OSDescription}; shell: {shellName}; user: {Environment.UserName}; current directory: {Environment.CurrentDirectory}.
@@ -682,7 +791,7 @@ internal sealed class JobRunner(
             Mark a run_command as read_only=true ONLY when you are sure it changes nothing (including side effects such as installing, writing files, network writes or starting services). You decide what is safe or dangerous: when in doubt, it is not read-only.
             {sessionBlock}
             {privacyBlock}
-
+            {userBlock}
             Rules:
             - Work step by step. Before acting, say in one short sentence what you are about to do. Keep all text brief and plain (no markdown).
             - Inspect before changing. Prefer the built-in tools over shell commands for files: list_dir (tree), read_file, stat_path (exists?), write_file, propose_change. They behave the same on every OS.
@@ -695,6 +804,7 @@ internal sealed class JobRunner(
             - If a result says interrupted_by_user, stop and use ask_user to ask whether to continue.
             - Messages starting with "[Nota del usuario mientras trabajabas]" are guidance the user typed while you were working: take them into account.
             - Use ask_user only when you truly need a decision. When the task is complete, reply with a short summary and no tool calls.
+            - Every tool accepts an optional "journal" field: a persistent job log used to resume the work if it gets interrupted (you will NOT keep this conversation or the file contents you read, only that log). Use it to record conclusions of your analysis, decisions agreed with the user and progress, one short sentence each, so the work can continue without re-reading everything. Never put secrets or file contents in it.
             - Answer in the language of the user's request.
             """;
     }

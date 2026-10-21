@@ -12,6 +12,8 @@ internal static class HazmeKeys
     public const string Plan = "plan";
     public const string LessSafe = "less-safe";
     public const string RiskAck = "risk-ack";
+    public const string PersistJobs = "persist-jobs";
+    public const string JobRetentionHours = "job-retention-hours";
 
     public const string LessSafeWarning =
         "⚠ MODO MENOS SEGURO ACTIVADO. hazme leerá archivos privados (claves, credenciales, .env...) sin pedirte\n" +
@@ -32,6 +34,10 @@ internal static class HazmeKeys
             Warn: v => v == "true" ? LessSafeWarning : null),
         new(RiskAck, "hazme: has leído y aceptado los riesgos de usar hazme (true/false)", Default: "false",
             Validate: v => v is "true" or "false" ? null : "admite 'true' o 'false'"),
+        new(PersistJobs, "hazme: guardar un diario cifrado del trabajo para poder retomarlo si se interrumpe (true/false)", Default: "true",
+            Validate: v => v is "true" or "false" ? null : "admite 'true' o 'false'"),
+        new(JobRetentionHours, "hazme: horas que se conserva un trabajo interrumpido antes de borrarse", Default: "4",
+            Validate: v => int.TryParse(v, out var n) && n > 0 ? null : "requiere un número entero > 0"),
         new(ConfirmChanges, "hazme: confirmar con diff toda escritura de archivos (true/false)", Default: "false",
             Validate: v => v is "true" or "false" ? null : "admite 'true' o 'false'"),
     ];

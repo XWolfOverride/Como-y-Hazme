@@ -6,11 +6,15 @@ using Hazme;
 
 const string Usage = """
     Uso:
+      hazme                       Sin tarea (con terminal): pregunta qué hacer
       hazme <tarea...>            La IA realiza la tarea ejecutando comandos en este equipo
       hazme -get [clave]          Muestra claves y valores (-get <clave> solo el valor)
       hazme -set <clave> <valor>  Establece el valor de una clave
       hazme -connectors           Lista los conectores implementados
       hazme -models               Lista los modelos disponibles del conector
+      hazme -jobs                 Lista los trabajos interrumpidos que se pueden retomar
+      hazme -resume [id] [texto]  Retoma un trabajo (el más reciente por defecto), con instrucciones opcionales
+      hazme -discard <id|all>     Borra trabajos interrumpidos
 
     Opciones (en cualquier posición):
       -no-color                   Desactiva los colores en esta llamada
@@ -18,6 +22,7 @@ const string Usage = """
       -confirm                    Confirma con diff TODA escritura de archivos en esta llamada
       -no-plan                    Sin plan previo: la IA actúa directamente en esta llamada
       -less-safe                  MODO MENOS SEGURO en esta llamada: lee archivos privados sin preguntar
+      -no-persist                 No guarda el diario del trabajo en esta llamada (no podrá retomarse)
       -y                          Desatendido: no pide confirmaciones (plan, diffs); mantiene los
                                   tiempos de gracia de los comandos y no deja la conversación abierta
 
@@ -38,12 +43,19 @@ const string Usage = """
       max-steps                   Máximo de pasos por trabajo (por defecto 30)
       shell                       Shell a usar (por defecto: bash/sh, PowerShell en Windows)
       confirm-changes             true = confirmar con diff toda escritura de archivos (por defecto false)
+      persist-jobs                false = no guardar nunca el diario de trabajos (por defecto true)
+      job-retention-hours         Horas que se conserva un trabajo interrumpido (por defecto 4)
+
+    Instrucciones permanentes: escribe lo que la IA debe tener siempre en cuenta en ~/.como/AGENTS.md
+    y/o ~/AGENTS.md.
     """;
 
 Console.OutputEncoding = new UTF8Encoding(false);
 
 using var job = new CancellationTokenSource();
 var shell = default(ShellRunner);
+JobLog? log = null;
+var retentionHours = 4;
 
 try
 {
@@ -52,16 +64,21 @@ try
     var noPlanFlag = args.Contains("-no-plan");
     var yesFlag = args.Contains("-y");
     var lessSafeFlag = args.Contains("-less-safe");
+    var noPersistFlag = args.Contains("-no-persist");
     if (!CliCommon.TryParse(
-            args.Where(a => a is not ("-confirm" or "-no-plan" or "-y" or "-less-safe")).ToArray(), out var options))
+            args.Where(a => a is not ("-confirm" or "-no-plan" or "-y" or "-less-safe" or "-no-persist")).ToArray(),
+            out var options))
         return 1;
+    var verb = options.Command.FirstOrDefault();
 
-    if (options.Command.Length == 0)
+    // Sin tarea y con terminal, hazme pide la primera tarea; sin terminal no hay a quién preguntar.
+    var askTask = options.Command.Length == 0 && !Console.IsInputRedirected;
+    if (options.Command.Length == 0 && !askTask)
     {
         Console.WriteLine(Usage);
         return 1;
     }
-    if (options.Command[0] is "-h" or "--help" or "-help")
+    if (!askTask && options.Command[0] is "-h" or "--help" or "-help")
     {
         Console.WriteLine(Usage);
         return 0;
@@ -71,7 +88,12 @@ try
     var store = new SettingsStore();
     ConsoleUi.NoColor = options.NoColor || KnownKeys.IsTrue(store.Get(KnownKeys.NoColor));
 
+    retentionHours = Math.Max(1, KnownKeys.IntValue(store, HazmeKeys.JobRetentionHours, 4));
+    JobFiles.Purge(retentionHours);
+
     if (await CliCommon.TryRunAsync(options, store) is { } code) return code;
+    if (verb == "-jobs") return ListJobs(retentionHours);
+    if (verb == "-discard") return DiscardJobs(options.Command);
 
     var connector = CliCommon.ResolveConnector(store, options.Connector);
     shell = new ShellRunner(store);
@@ -104,17 +126,83 @@ try
     if (interaction.Interactive && !Console.IsOutputRedirected)
         ConsoleUi.WriteLine("Esc: abortar · escribe + Enter: nota para la IA · Ctrl-C: interrumpir comando", ConsoleColor.DarkGray);
 
+    var persist = !noPersistFlag && KnownKeys.Value(store, HazmeKeys.PersistJobs) != "false";
+    var command = options.Command;
+    JobRecord? resumed = null;
+    string? extra = null;
+
+    if (verb == "-resume")
+    {
+        if (!JobFiles.TryPick(command[1..], out resumed, out extra))
+        {
+            ConsoleUi.Error($"No hay ningún trabajo que retomar (se borran a las {retentionHours} h). Mira: hazme -jobs");
+            return 1;
+        }
+    }
+    else if (askTask)
+    {
+        if (JobFiles.List() is { Count: > 0 } pending)
+        {
+            var p = pending[0];
+            ConsoleUi.Write($"Hay un trabajo interrumpido {JobFiles.Ago(p.Updated)}: ", ConsoleColor.Yellow);
+            ConsoleUi.WriteLine(Short(p.Task), ConsoleColor.White);
+            ConsoleUi.Write("[R]", ConsoleColor.Green);
+            ConsoleUi.Write("etomar  ", ConsoleColor.Gray);
+            ConsoleUi.Write("[D]", ConsoleColor.Red);
+            ConsoleUi.Write("escartar  ", ConsoleColor.Gray);
+            ConsoleUi.Write("[N]", ConsoleColor.Cyan);
+            ConsoleUi.WriteLine("ueva tarea", ConsoleColor.Gray);
+
+            switch (interaction.ReadChoice("rdn"))
+            {
+                case 'r': resumed = p; break;
+                case 'd': JobFiles.Delete(p.Id); break;
+                case null: return 0;
+            }
+        }
+
+        if (resumed is null)
+        {
+            ConsoleUi.WriteLine("¿Qué quieres que haga? (Enter o Esc para salir; `hazme -h` muestra la ayuda)", ConsoleColor.DarkGray);
+            ConsoleUi.Write("› ", ConsoleColor.White);
+            var first = interaction.ReadLine(escCancelsJob: false);
+            if (string.IsNullOrWhiteSpace(first)) return 0;
+            command = [first.Trim()];
+        }
+    }
+
     interaction.Start();
     try
     {
         // El nombre del programa ("hazme") es la primera palabra de la petición: se restaura.
-        var task = "hazme " + string.Join(' ', options.Command);
+        string task;
+        string? firstPrompt = null;
+        if (resumed is null)
+        {
+            task = "hazme " + string.Join(' ', command);
+            log = persist ? JobLog.Create(task, connector.Id) : JobLog.Disabled;
+        }
+        else
+        {
+            task = resumed.Task;
+            ConsoleUi.Write($"↺ Retomando el trabajo {resumed.Id}: ", ConsoleColor.Cyan);
+            ConsoleUi.WriteLine(Short(task), ConsoleColor.White);
+            if (Directory.Exists(resumed.Cwd))
+                Directory.SetCurrentDirectory(resumed.Cwd);
+            else
+                ConsoleUi.WriteLine($"  ⚠ el directorio original ya no existe: {resumed.Cwd}", ConsoleColor.Yellow, error: true);
+
+            log = JobLog.Resume(resumed);
+            firstPrompt = log.BuildResumePrompt(extra);
+            log.Note("usuario", extra is null ? "retoma el trabajo" : "retoma el trabajo: " + extra);
+            if (!persist) log.Finish(); // sin persistencia no debe quedar ningún rastro
+        }
         var confirmAll = confirmFlag || KnownKeys.IsTrue(KnownKeys.Value(store, HazmeKeys.ConfirmChanges));
         var chat = Hazme.Chat.ChatClients.For(connector, store);
         var planRequired = !noPlanFlag && KnownKeys.Value(store, HazmeKeys.Plan) != "false";
 
-        return await new JobRunner(chat, store, interaction, shell, confirmAll, planRequired, yesFlag, lessSafe, job.Token)
-            .RunAsync(task);
+        return await new JobRunner(chat, store, interaction, shell, confirmAll, planRequired, yesFlag, lessSafe, log, job.Token)
+            .RunAsync(task, firstPrompt);
     }
     finally
     {
@@ -124,13 +212,64 @@ try
 catch (Exception e) when (e is SettingsException or ConnectorException)
 {
     ConsoleUi.Error(e.Message);
+    log?.PrintResumeHint(retentionHours);
     return 1;
 }
 catch (OperationCanceledException)
 {
     Console.WriteLine();
     ConsoleUi.WriteLine("✖ Trabajo abortado.", ConsoleColor.Red);
+    log?.PrintResumeHint(retentionHours);
     return 130;
+}
+
+static string Short(string text)
+{
+    text = text.ReplaceLineEndings(" ");
+    return text.Length > 80 ? text[..80] + "…" : text;
+}
+
+static int ListJobs(int retentionHours)
+{
+    var jobs = JobFiles.List();
+    if (jobs.Count == 0)
+    {
+        Console.WriteLine("No hay trabajos pendientes.");
+        return 0;
+    }
+    foreach (var j in jobs)
+    {
+        ConsoleUi.Write(j.Id, ConsoleColor.Cyan);
+        ConsoleUi.Write("  " + JobFiles.Ago(j.Updated).PadRight(18), ConsoleColor.DarkGray);
+        ConsoleUi.WriteLine(Short(j.Task), ConsoleColor.White);
+    }
+    ConsoleUi.WriteLine($"Retomar: hazme -resume [id]   ·   Borrar: hazme -discard <id|all>   (se borran a las {retentionHours} h)",
+        ConsoleColor.DarkGray);
+    return 0;
+}
+
+static int DiscardJobs(string[] command)
+{
+    if (command.Length != 2)
+    {
+        ConsoleUi.Error("Uso: -discard <id|all>");
+        return 1;
+    }
+    if (command[1] == "all")
+    {
+        var all = JobFiles.List();
+        foreach (var j in all) JobFiles.Delete(j.Id);
+        Console.WriteLine($"Borrados {all.Count} trabajos.");
+        return 0;
+    }
+    if (JobFiles.Load(command[1]) is null)
+    {
+        ConsoleUi.Error($"No existe el trabajo {command[1]}.");
+        return 1;
+    }
+    JobFiles.Delete(command[1]);
+    Console.WriteLine("Borrado.");
+    return 0;
 }
 
 

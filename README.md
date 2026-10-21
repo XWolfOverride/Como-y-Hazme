@@ -119,11 +119,26 @@ Para no dejar la clave en el historial, usa la variable de entorno del conector 
 | `-confirm` | Solo `hazme`: confirma con diff toda escritura de archivos |
 | `-no-plan` | Solo `hazme`: sin plan previo, la IA actúa directamente (o `set plan false`) |
 | `-less-safe` | Solo `hazme`: **modo menos seguro** en esta llamada, lee archivos privados sin preguntar (o `set less-safe true`) |
+| `-jobs` / `-resume [id] [texto]` / `-discard <id\|all>` | Solo `hazme`: lista, retoma o borra trabajos interrumpidos (ver abajo) |
+| `-no-persist` | Solo `hazme`: no guarda el diario del trabajo en esta llamada (o `set persist-jobs false`) |
 | `-y` | Solo `hazme`, **desatendido** (scripts): no pide confirmaciones de plan ni de diffs, **mantiene los tiempos de gracia** de los comandos y termina al acabar. No lee archivos privados |
 
 Las opciones pueden ir en cualquier posición. Claves: `connector`, `no-color`, `<conector>.api-key`,
 `<conector>.model`, `<conector>.base-url`; y de `hazme`: `plan` (true), `less-safe` (false), `grace-seconds` (5), `max-steps` (30),
-`shell`, `confirm-changes` (false). Tu configuración conserva las claves que cada herramienta no conoce.
+`shell`, `confirm-changes` (false), `persist-jobs` (true), `job-retention-hours` (4). Tu configuración conserva las claves que cada herramienta no conoce.
+
+### Retomar un trabajo interrumpido
+
+Si un trabajo de `hazme` se corta (Esc, error de red, cierre de la terminal), `hazme -resume` lo retoma. Solo se
+guarda un **diario cifrado y breve** (tarea, conclusiones de la IA, decisiones, comandos y cambios hechos, último
+plan), **nunca** el contenido de archivos ni la salida de comandos: la IA vuelve a leer lo que necesite y presenta
+de nuevo el plan. El diario se **borra al terminar** el trabajo y caduca solo a las 4 h (`job-retention-hours`).
+`persist-jobs false` o `-no-persist` lo desactivan.
+
+### Instrucciones permanentes
+
+Lo que escribas en `~/.como/AGENTS.md` y/o `~/AGENTS.md` se envía a la IA en cada trabajo de `hazme` (preferencias,
+convenciones, cosas a evitar). No puede anular las reglas de seguridad.
 
 ### Conectores
 

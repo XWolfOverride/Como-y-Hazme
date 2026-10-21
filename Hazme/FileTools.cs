@@ -8,6 +8,31 @@ internal static class FileTools
     private const int MaxListEntries = 500;
     public const int MaxFileChars = 64_000;
 
+    private const int MaxUserInstructionsChars = 8_000;
+
+    /// <summary>
+    /// Instrucciones permanentes del usuario: AGENTS.md en ~/.como y en la carpeta personal (en ese orden).
+    /// Devuelve null si no hay ninguno. Se recorta para no inflar cada petición.
+    /// </summary>
+    public static string? LoadUserInstructions()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var sb = new StringBuilder();
+        foreach (var path in new[] { Path.Combine(home, ".como", "AGENTS.md"), Path.Combine(home, "AGENTS.md") })
+        {
+            try
+            {
+                if (!File.Exists(path)) continue;
+                var text = File.ReadAllText(path).Trim();
+                if (text.Length > 0) sb.Append(text).Append("\n\n");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        var all = sb.ToString().Trim();
+        if (all.Length == 0) return null;
+        return all.Length > MaxUserInstructionsChars ? all[..MaxUserInstructionsChars] + "\n[... recortado ...]" : all;
+    }
+
     /// <summary>Expande "~" y resuelve rutas relativas contra el directorio actual.</summary>
     public static string Resolve(string path)
     {
