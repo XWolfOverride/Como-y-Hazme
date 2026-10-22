@@ -15,8 +15,6 @@ const string Usage = """
       hazme -jobs                 Lista los trabajos interrumpidos que se pueden retomar
       hazme -resume [id] [texto]  Retoma un trabajo (el más reciente por defecto), con instrucciones opcionales
       hazme -discard <id|all>     Borra trabajos interrumpidos
-      hazme -agent [opciones]     Ejecutor remoto TEMPORAL para el hazme de otra máquina (una sola conexión).
-                                  Opciones: -port N (7700) -listen IP (127.0.0.1) -wait MIN (10) -idle MIN (30) -ttl MIN (120)
 
     Opciones (en cualquier posición):
       -no-color                   Desactiva los colores en esta llamada
@@ -24,7 +22,7 @@ const string Usage = """
       -confirm                    Confirma con diff TODA escritura de archivos en esta llamada
       -no-plan                    Sin plan previo: la IA actúa directamente en esta llamada
       -less-safe                  MODO MENOS SEGURO en esta llamada: lee archivos privados sin preguntar
-      -peer id:host:puerto        Trabaja también en otra máquina con un agente en marcha (repetible); pide su token
+      -peer id:host:puerto        Trabaja también en otra máquina donde corra `hazme-agent` (repetible); pide su token
       -no-persist                 No guarda el diario del trabajo en esta llamada (no podrá retomarse)
       -y                          Desatendido: no pide confirmaciones (plan, diffs); mantiene los
                                   tiempos de gracia de los comandos y no deja la conversación abierta
@@ -94,11 +92,11 @@ try
         return 1;
     var verb = options.Command.FirstOrDefault();
 
-    // El agente remoto no usa IA ni configuración: arranca y se queda esperando una conexión.
+    // El agente remoto es un programa aparte (hazme-agent), sin IA ni configuración.
     if (verb == "-agent")
     {
-        ConsoleUi.NoColor = options.NoColor;
-        return await Hazme.Peer.AgentServer.RunAsync(options.Command);
+        ConsoleUi.Error("El agente remoto es otro programa: ejecuta `hazme-agent` en la máquina remota (hazme-agent -h).");
+        return 1;
     }
 
     // Sin tarea y con terminal, hazme pide la primera tarea; sin terminal no hay a quién preguntar.

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>hazme-agent</AssemblyName>
+    <RootNamespace>Hazme.Agent</RootNamespace>
+    <PublishAot>true</PublishAot>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <StripSymbols>true</StripSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Como.Core\Como.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Código compartido con hazme (se compila en cada ejecutable; no hay biblioteca común a propósito):
+       el canal cifrado y el protocolo, y el lanzador de comandos. Aquí NO hay IA, conectores ni JobRunner. -->
+  <ItemGroup>
+    <Compile Include="..\Hazme\ShellRunner.cs" />
+    <Compile Include="..\Hazme\HazmeKeys.cs" />
+    <Compile Include="..\Hazme\Peer\PeerCrypto.cs" />
+    <Compile Include="..\Hazme\Peer\PeerProtocol.cs" />
+  </ItemGroup>
+
+</Project>

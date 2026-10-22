@@ -4,11 +4,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Como;
+using Como.Settings;
 
 namespace Hazme.Peer;
 
 /// <summary>
-/// <c>hazme -agent</c>: ejecutor efímero para que un hazme de otra máquina trabaje aquí. Sin IA ni configuración.
+/// <c>hazme-agent</c>: ejecutor efímero para que un hazme de otra máquina trabaje aquí. Sin IA ni configuración.
 /// Una sola conexión (el puerto se cierra al autenticarse), un token de un solo uso mostrado en pantalla,
 /// y caducidad por espera, inactividad y duración total. Todo lo que ejecuta se ve en esta terminal.
 /// </summary>
@@ -22,7 +23,7 @@ internal static class AgentServer
         var listen = "127.0.0.1";
         TimeSpan wait = TimeSpan.FromMinutes(10), idle = TimeSpan.FromMinutes(30), ttl = TimeSpan.FromMinutes(120);
 
-        for (var i = 1; i < opts.Length; i++)
+        for (var i = 0; i < opts.Length; i++)
         {
             string? Next() => i + 1 < opts.Length ? opts[++i] : null;
             switch (opts[i])
@@ -33,7 +34,7 @@ internal static class AgentServer
                 case "-idle" when int.TryParse(Next(), out var d) && d > 0: idle = TimeSpan.FromMinutes(d); break;
                 case "-ttl" when int.TryParse(Next(), out var t) && t > 0: ttl = TimeSpan.FromMinutes(t); break;
                 default:
-                    ConsoleUi.Error($"Opción de -agent no válida: {opts[i]}. Admite: -port N, -listen DIRECCIÓN, -wait MIN, -idle MIN, -ttl MIN");
+                    ConsoleUi.Error($"Opción no válida: {opts[i]}. Admite: -port N, -listen IP, -wait MIN, -idle MIN, -ttl MIN (hazme-agent -h)");
                     return 1;
             }
         }
@@ -139,7 +140,7 @@ internal static class AgentServer
     private static void PrintBanner(IPEndPoint ep, string token, TimeSpan wait, TimeSpan idle, TimeSpan ttl, bool loopback)
     {
         Console.WriteLine();
-        ConsoleUi.WriteLine("hazme -agent: ejecutor remoto temporal", ConsoleColor.Magenta);
+        ConsoleUi.WriteLine("hazme-agent: ejecutor remoto temporal", ConsoleColor.Magenta);
         ConsoleUi.Write("  Escuchando en ", ConsoleColor.Gray);
         ConsoleUi.WriteLine($"{ep.Address}:{ep.Port}" + (loopback ? "  (solo esta máquina: usa un túnel ssh)" : ""), ConsoleColor.White);
         ConsoleUi.Write("  Token (cópialo al hazme de la otra máquina): ", ConsoleColor.Gray);
@@ -278,4 +279,11 @@ internal static class AgentServer
             if (r.Warning is not null) w.WriteString("warning", r.Warning);
         }), stop);
     }
+}
+
+/// <summary>El agente no usa la configuración del equipo: no tiene claves ni conectores.</summary>
+internal sealed class NoSettings : ISettings
+{
+    public static NoSettings Instance { get; } = new();
+    public string? Get(string key) => null;
 }

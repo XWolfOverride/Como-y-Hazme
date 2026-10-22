@@ -7,7 +7,7 @@
 # Qué hace:
 #   1. Comprueba que están instaladas las herramientas necesarias (NO instala nada).
 #   2. Descarga (o actualiza) la última versión del código con git.
-#   3. Compila `como` y `hazme` con NativeAOT.
+#   3. Compila `como`, `hazme` y `hazme-agent` (este último es opcional) con NativeAOT.
 #   4. Deja los binarios en la raíz del proyecto y te explica cómo instalarlos.
 #
 # Variables opcionales:
@@ -144,7 +144,7 @@ rm -rf "$ROOT/publish"
 exclude="$ROOT/.git/info/exclude"
 if [ -d "$ROOT/.git" ]; then
     mkdir -p "$ROOT/.git/info"
-    for f in /como /hazme /publish/; do
+    for f in /como /hazme /hazme-agent /publish/; do
         grep -qxF "$f" "$exclude" 2>/dev/null || echo "$f" >> "$exclude"
     done
 fi
@@ -163,12 +163,13 @@ build() {
 
 build Como  como
 build Hazme hazme
+build Hazme.Agent hazme-agent
 rm -rf "$ROOT/publish"
 
 # ---------------------------------------------------------------- final
 echo
 echo "${B}${G}Listo.${N} Los binarios están en: ${B}$ROOT${N}"
-ls -lh "$ROOT/como" "$ROOT/hazme" | awk '{printf "    %s  %s\n", $5, $9}'
+ls -lh "$ROOT/como" "$ROOT/hazme" "$ROOT/hazme-agent" | awk '{printf "    %s  %s\n", $5, $9}'
 echo
 echo "${B}Para instalarlos${N} elige una opción (desde ${C}$ROOT${N}):"
 echo
@@ -177,6 +178,9 @@ echo "    mkdir -p ~/.local/bin && install -m 755 como hazme ~/.local/bin/"
 echo
 echo "  ${B}Para todos los usuarios${N}:"
 echo "    sudo install -m 755 como hazme /usr/local/bin/"
+echo
+echo "${B}hazme-agent${N} NO se instala con lo anterior: es un ejecutor remoto opcional. Cópialo solo a los"
+echo "servidores donde quieras usarlo (p. ej. scp hazme-agent usuario@servidor:) y ejecútalo allí a mano."
 echo
 echo "Comprueba con:  como -connectors"
 echo "Después configura tu API key, por ejemplo:  como -set claude.api-key sk-ant-..."

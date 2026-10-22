@@ -2,4 +2,5 @@
   <Project Path="Como.Core/Como.Core.csproj" />
   <Project Path="Como/Como.csproj" />
   <Project Path="Hazme/Hazme.csproj" />
+  <Project Path="Hazme.Agent/Hazme.Agent.csproj" />
 </Solution>

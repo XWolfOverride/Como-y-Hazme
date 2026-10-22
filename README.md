@@ -135,14 +135,16 @@ plan), **nunca** el contenido de archivos ni la salida de comandos: la IA vuelve
 de nuevo el plan. El diario se **borra al terminar** el trabajo y caduca solo a las 4 h (`job-retention-hours`).
 `persist-jobs false` o `-no-persist` lo desactivan.
 
-### Trabajar en varios servidores a la vez (`-agent` / `-peer`)
+### Trabajar en varios servidores a la vez (`hazme-agent` / `-peer`)
 
 Un solo `hazme` (un solo contexto) puede ejecutar comandos también en otras máquinas, con los mismos controles
-(comando visible, tiempo de gracia, plan, Esc). En la otra máquina corre un **agente temporal**, sin IA ni claves:
+(comando visible, tiempo de gracia, plan, Esc). En la otra máquina corre `hazme-agent`, un **ejecutor temporal** y
+independiente (otro binario, sin IA ni claves, que **no se instala con `como` y `hazme`**: cópialo solo a los servidores
+donde lo quieras, p. ej. con `scp`; los scripts de compilación lo generan junto a los otros dos):
 
 ```console
 # En B (por ssh, p. ej.):                    # En A:
-$ hazme -agent                               $ ssh -L 7700:127.0.0.1:7700 usuario@B     # túnel (o -listen en la misma red)
+$ hazme-agent                               $ ssh -L 7700:127.0.0.1:7700 usuario@B     # túnel (o -listen en la misma red)
   Token: K7QM-2XPD-9TRB-...                  $ hazme -peer web2:127.0.0.1:7700 migra X de web2 a este servidor
                                                Token de «web2» › ****
 ```
@@ -201,12 +203,13 @@ Vulnerabilidades: [SECURITY.md](SECURITY.md).
 ## Estructura
 
 ```
-Como.Core/   Conectores (solo preguntar), configuración cifrada, consola
-Como/        Ejecutable "como"  → solo depende de Como.Core
-Hazme/       Ejecutable "hazme" → Como.Core + agente, herramientas y ejecución de comandos
+Como.Core/    Conectores (solo preguntar), configuración cifrada, consola
+Como/         Ejecutable "como"  → solo depende de Como.Core
+Hazme/        Ejecutable "hazme" → Como.Core + agente de IA, herramientas, ejecución de comandos y cliente de peers
+Hazme.Agent/  Ejecutable "hazme-agent" → solo el ejecutor remoto temporal (sin IA); comparte con hazme el canal cifrado
 ```
 
-Todo lo que ejecuta o toca archivos está únicamente en `Hazme/`. Para añadir un conector: implementar
+Todo lo que ejecuta o toca archivos está únicamente en `Hazme/` y `Hazme.Agent/`. Para añadir un conector: implementar
 `IAiConnector` en `Como.Core/Connectors`, registrarlo en `ConnectorRegistry` y, si `hazme` ha de usarlo,
 su cliente de herramientas en `Hazme/Chat` (los compatibles con OpenAI no necesitan nada: usan `openai`).
 

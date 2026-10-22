@@ -5,7 +5,7 @@
 # Qué hace:
 #   1. Comprueba que están instaladas las herramientas necesarias (NO instala nada).
 #   2. Descarga (o actualiza) la última versión del código con git.
-#   3. Compila `como` y `hazme` con NativeAOT.
+#   3. Compila `como`, `hazme` y `hazme-agent` (este ultimo es opcional) con NativeAOT.
 #   4. Deja los .exe en la raíz del proyecto y te explica cómo instalarlos.
 #
 # Variable opcional:
@@ -119,7 +119,7 @@ function Invoke-ComoBuild {
     $pub = Join-Path $root 'publish'
     if (Test-Path $pub) { Remove-Item $pub -Recurse -Force }
 
-    foreach ($p in @(@{ Project = 'Como'; Exe = 'como' }, @{ Project = 'Hazme'; Exe = 'hazme' })) {
+    foreach ($p in @(@{ Project = 'Como'; Exe = 'como' }, @{ Project = 'Hazme'; Exe = 'hazme' }, @{ Project = 'Hazme.Agent'; Exe = 'hazme-agent' })) {
         $proj = Join-Path $root "$($p.Project)\$($p.Project).csproj"
         $out = Join-Path $pub $p.Exe
         Info "Compilando $($p.Exe) (NativeAOT, $rid)... puede tardar un par de minutos"
@@ -136,7 +136,7 @@ function Invoke-ComoBuild {
     Write-Host ""
     Write-Host "Listo. " -ForegroundColor Green -NoNewline
     Write-Host "Los programas estan en: $root"
-    foreach ($e in 'como.exe', 'hazme.exe') {
+    foreach ($e in 'como.exe', 'hazme.exe', 'hazme-agent.exe') {
         $f = Get-Item (Join-Path $root $e)
         Write-Host ("    {0,8:N1} MB  {1}" -f ($f.Length / 1MB), $e)
     }
@@ -148,6 +148,9 @@ function Invoke-ComoBuild {
     Write-Host '    copy como.exe, hazme.exe $HOME\bin'
     Write-Host '    $p = [Environment]::GetEnvironmentVariable("Path", "User")'
     Write-Host '    [Environment]::SetEnvironmentVariable("Path", "$p;$HOME\bin", "User")'
+    Write-Host ""
+    Write-Host "hazme-agent.exe NO se instala con lo anterior: es un ejecutor remoto opcional. Copialo solo a los"
+    Write-Host "servidores donde quieras usarlo y ejecutalo alli a mano."
     Write-Host ""
     Write-Host "Cierra y vuelve a abrir la terminal y comprueba con:  como -connectors"
     Write-Host "Despues configura tu API key, por ejemplo:  como -set claude.api-key sk-ant-..."

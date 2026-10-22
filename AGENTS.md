@@ -27,7 +27,7 @@ Como.Core/           Biblioteca común (SOLO preguntar)
   Connectors/          IAiConnector + Claude, Gemini, OpenAiCompatible (+HttpUtil), ConnectorRegistry
   Settings/            SettingsStore (~/.como/config cifrado, compartido), EncryptedFile (AES-GCM) y KnownKeys (catálogo de claves)
 Como/Program.cs     Ejecutable `como`: solo depende de Como.Core
-Hazme/               Ejecutable `hazme` (todo lo que ejecuta o toca archivos vive SOLO aquí)
+Hazme/               Ejecutable `hazme` (la IA y todo lo que ejecuta o toca archivos; incluye Peer/ = cliente de peers y canal cifrado)
   Program.cs           Parseo de flags, aceptación de riesgos (risk-ack), aviso de modelo pequeño, arranque
   JobRunner.cs         Bucle agente: herramientas, plan previo, diffs, tiempo de gracia, system prompt
   Interaction.cs       Teclado: Esc aborta, texto+Enter = nota a la IA, ReadChoice/ReadLine
@@ -37,6 +37,7 @@ Hazme/               Ejecutable `hazme` (todo lo que ejecuta o toca archivos viv
   JobStore.cs          Diario cifrado para retomar trabajos: JobRecord, JobFiles (~/.como/jobs/*.job), JobLog
   HazmeKeys.cs         Claves propias de hazme (plan, less-safe, grace-seconds, max-steps, shell, confirm-changes, risk-ack, persist-jobs, job-retention-hours)
   Chat/                IChatClient con tool use por conector: ClaudeChat, GeminiChat, OpenAiChat
+Hazme.Agent/         Ejecutable `hazme-agent`: solo el ejecutor remoto temporal (ver «Agente remoto»), sin IA
 docs/  .github/workflows/build.yml  build.sh  build.ps1  SECURITY.md
 ```
 
@@ -68,11 +69,16 @@ docs/  .github/workflows/build.yml  build.sh  build.ps1  SECURITY.md
   Al retomar la IA recibe el diario como primer mensaje y **ningún plan queda aprobado**: debe verificar y replanificar.
 - Se desactiva con `-no-persist` o `persist-jobs false`.
 
-## Agente remoto y peers (Hazme/Peer/)
+## Agente remoto y peers (Hazme.Agent/ y Hazme/Peer/)
 
-Un solo `JobRunner` (un contexto) puede ejecutar en otras máquinas. `hazme -agent` (AgentServer.cs) es un ejecutor
-efímero **sin IA ni config** (`NoSettings`, `ShellRunner(noStdin: true)`); `-peer id:host:puerto` (PeerClient.cs/PeerSet)
-conecta a él. Las reglas (plan, diff, tiempo de gracia, privacidad) las aplica **A**; **B solo muestra y obedece**.
+Un solo `JobRunner` (un contexto) puede ejecutar en otras máquinas. **`hazme-agent`** es un **tercer ejecutable**
+(`Hazme.Agent/`: Program.cs, AgentServer.cs; solo la parte servidora, **sin IA, conectores ni JobRunner**, con `NoSettings` y
+`ShellRunner(noStdin: true)`); `hazme` solo lleva la parte cliente (`-peer id:host:puerto`, `Hazme/Peer/PeerClient.cs`, `PeerSet`).
+Comparten por **enlace de archivos** (`<Compile Include>` en `Hazme.Agent.csproj`, sin biblioteca común) `ShellRunner.cs`,
+`HazmeKeys.cs`, `Peer/PeerCrypto.cs` y `Peer/PeerProtocol.cs`: cualquier cambio ahí afecta a los dos binarios.
+Los scripts `build.sh`/`build.ps1` lo compilan, pero **no figura en las órdenes de instalación** (es opcional y va solo a los
+servidores remotos); `hazme -agent` responde con un aviso que remite a `hazme-agent`. Las reglas (plan, diff, tiempo de gracia, privacidad) las aplica **A**; **B solo muestra y obedece**.
+
 - Seguridad (PeerCrypto.cs): token Crockford base32 de 140 bits generado en B; handshake HMAC mutuo (el cliente envía SIEMPRE
   su prueba antes de verificar la del agente, para que un token malo cuente); claves HKDF por dirección; tramas AES-GCM con
   contador implícito. Una sola conexión (se cierra el listener), 3 tokens malos = agente cerrado, esperas `-wait/-idle/-ttl`.

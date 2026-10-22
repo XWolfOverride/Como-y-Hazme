@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Como.Settings;
 
 namespace Hazme.Peer;
 
@@ -58,11 +57,4 @@ internal sealed record PeerInfo(string Machine, string Os, string Shell, string 
         PeerMsg.Str(e, "machine") ?? "?", PeerMsg.Str(e, "os") ?? "?", PeerMsg.Str(e, "shell") ?? "?",
         PeerMsg.Str(e, "user") ?? "?", PeerMsg.Str(e, "home") ?? "?", PeerMsg.Str(e, "cwd") ?? "?",
         PeerMsg.Bool(e, "root"));
-}
-
-/// <summary>El agente no usa la configuración del equipo: no tiene claves ni conectores.</summary>
-internal sealed class NoSettings : ISettings
-{
-    public static NoSettings Instance { get; } = new();
-    public string? Get(string key) => null;
 }

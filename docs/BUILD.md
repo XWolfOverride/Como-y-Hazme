@@ -1,4 +1,4 @@
-# Compilar `como` y `hazme`
+# Compilar `como`, `hazme` y `hazme-agent`
 
 No hace falta para usar el programa (hay [binarios en Releases](https://github.com/XWolfOverride/Como-y-Hazme/releases)):
 sirve para tener la última versión, usarlo en **macOS**, en ARM o auditar lo que ejecutas.
@@ -36,6 +36,7 @@ Tras instalar, **reabre la terminal**.
 git clone https://github.com/XWolfOverride/Como-y-Hazme && cd Como-y-Hazme
 dotnet publish Como/Como.csproj   -c Release -p:PublishAot=false -o salida
 dotnet publish Hazme/Hazme.csproj -c Release -p:PublishAot=false -o salida
+dotnet publish Hazme.Agent/Hazme.Agent.csproj -c Release -p:PublishAot=false -o salida   # opcional
 ```
 
 La carpeta `salida` contiene `como` y `hazme` (`.exe` en Windows) con sus `.dll`: **mantenla completa** y
@@ -63,6 +64,7 @@ irm https://raw.githubusercontent.com/XWolfOverride/Como-y-Hazme/master/build.ps
 ```bash
 dotnet publish Como/Como.csproj   -c Release -r <RID>
 dotnet publish Hazme/Hazme.csproj -c Release -r <RID>
+dotnet publish Hazme.Agent/Hazme.Agent.csproj -c Release -r <RID>   # opcional: hazme-agent
 ```
 
 Los binarios quedan en `Como/bin/Release/net10.0/<RID>/publish/` y `Hazme/bin/Release/net10.0/<RID>/publish/`.
@@ -77,6 +79,10 @@ Los binarios quedan en `Como/bin/Release/net10.0/<RID>/publish/` y `Hazme/bin/Re
 mkdir -p ~/.local/bin && install -m 755 como hazme ~/.local/bin/    # usuario (añade ~/.local/bin al PATH si hace falta)
 sudo install -m 755 como hazme /usr/local/bin/                      # todos los usuarios
 ```
+
+**`hazme-agent`** (el ejecutor remoto temporal) se compila con los demás pero **no va en estas órdenes**: es opcional
+y solo hace falta en las máquinas remotas donde quieras usar `hazme -peer`. Cópialo allí a mano
+(`scp hazme-agent usuario@servidor:`) y ejecútalo cuando lo necesites.
 
 En Windows, copia los `.exe` a `$HOME\bin` y añádela al `PATH` (ver [README](../README.md#instalación)).
 
