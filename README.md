@@ -124,7 +124,7 @@ Para no dejar la clave en el historial, usa la variable de entorno del conector 
 | `-y` | Solo `hazme`, **desatendido** (scripts): no pide confirmaciones de plan ni de diffs, **mantiene los tiempos de gracia** de los comandos y termina al acabar. No lee archivos privados |
 
 Las opciones pueden ir en cualquier posición. Claves: `connector`, `no-color`, `<conector>.api-key`,
-`<conector>.model`, `<conector>.base-url`, `openai.reasoning-effort`; y de `hazme`: `plan` (true), `less-safe` (false), `grace-seconds` (5), `max-steps` (30),
+`<conector>.model`, `<conector>.base-url`, `openai.reasoning-effort`, `openai.api` (chat, responses o auto); y de `hazme`: `plan` (true), `less-safe` (false), `grace-seconds` (5), `max-steps` (30),
 `shell`, `confirm-changes` (false), `persist-jobs` (true), `job-retention-hours` (4). Tu configuración conserva las claves que cada herramienta no conoce.
 
 ### Retomar un trabajo interrumpido

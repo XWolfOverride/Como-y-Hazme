@@ -16,6 +16,7 @@ public abstract class OpenAiCompatibleConnector : IAiConnector
     private readonly ConfigKey _model;
     private readonly ConfigKey _baseUrl;
     private readonly ConfigKey _reasoning;
+    private readonly ConfigKey _api;
 
     protected OpenAiCompatibleConnector(
         string id, string vendor, string defaultBaseUrl, string defaultModel, string apiKeyEnvVar)
@@ -27,7 +28,11 @@ public abstract class OpenAiCompatibleConnector : IAiConnector
         _reasoning = new ConfigKey("reasoning-effort",
             "Esfuerzo de razonamiento que se envía (none, minimal, low, medium, high...); vacío = el del servicio",
             Validate: v => v.All(c => char.IsAsciiLetterLower(c) || c == '-') ? null : "usa una palabra en minúsculas (p. ej. none, low, medium, high)");
-        Keys = [_apiKey, _model, _baseUrl, _reasoning];
+        _api = new ConfigKey("api",
+            "API que usa hazme: chat (Chat Completions), responses (/v1/responses) o auto (chat y cambia a responses si el servicio lo pide)",
+            Default: "chat",
+            Validate: v => v is "chat" or "responses" or "auto" ? null : "admite chat, responses o auto");
+        Keys = [_apiKey, _model, _baseUrl, _reasoning, _api];
     }
 
     public string Id { get; }

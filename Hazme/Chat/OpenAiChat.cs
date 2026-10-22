@@ -11,7 +11,7 @@ namespace Hazme.Chat;
 /// Herramientas sobre el protocolo Chat Completions de OpenAI. Sirve para OpenAI y para cualquier
 /// servicio compatible que se alcance cambiando la base-url.
 /// </summary>
-internal sealed class OpenAiChat(IAiConnector connector, ISettings settings) : IChatClient
+internal sealed class OpenAiChat(IAiConnector connector, ISettings settings, bool explicitChat = true) : IChatClient
 {
     // Tras un rechazo por razonamiento+herramientas, el resto de la sesión ya va con "none".
     private static string? s_effortFallback;
@@ -24,6 +24,23 @@ internal sealed class OpenAiChat(IAiConnector connector, ISettings settings) : I
     }
 
     public async Task<ChatTurn> ChatAsync(
+        IReadOnlyList<ChatMessage> history, ChatRequest request, Action<string> onText, CancellationToken ct)
+    {
+        try
+        {
+            return await ChatCoreAsync(history, request, onText, ct);
+        }
+        catch (ConnectorException e) when (explicitChat && e.Message.Contains("v1/responses", StringComparison.OrdinalIgnoreCase)
+                                           && !e.Message.Contains("openai.api", StringComparison.Ordinal))
+        {
+            // El propio servicio dice que ese modelo solo funciona con /v1/responses: se le explica al usuario cómo activarla.
+            throw new ConnectorException(e.Message +
+                "\nEste modelo solo funciona con la API Responses. Actívala con `hazme -set openai.api responses` " +
+                "(o `auto`: usa Chat Completions y cambia sola si el servicio lo pide).");
+        }
+    }
+
+    private async Task<ChatTurn> ChatCoreAsync(
         IReadOnlyList<ChatMessage> history, ChatRequest request, Action<string> onText, CancellationToken ct)
     {
         var apiKey = ConnectorKeys.Require(connector, settings, "api-key");
@@ -118,7 +135,7 @@ internal sealed class OpenAiChat(IAiConnector connector, ISettings settings) : I
         {
             resp = await Send(effort);
         }
-        catch (ConnectorException e) when (effort != "none"
+        catch (ConnectorException e) when (explicitChat && effort != "none"
                                            && e.Message.Contains("reasoning_effort", StringComparison.OrdinalIgnoreCase)
                                            && e.Message.Contains("none", StringComparison.OrdinalIgnoreCase))
         {
@@ -127,7 +144,18 @@ internal sealed class OpenAiChat(IAiConnector connector, ISettings settings) : I
                 "⚠ El modelo no admite razonamiento con herramientas en Chat Completions: se usa reasoning_effort=none " +
                 "(fíjalo con `-set openai.reasoning-effort none` para no ver este aviso).", ConsoleColor.Yellow, error: true);
             s_effortFallback = "none";
-            resp = await Send("none");
+            try
+            {
+                resp = await Send("none");
+            }
+            catch (ConnectorException e2) when (e2.Message.Contains("reasoning_effort", StringComparison.OrdinalIgnoreCase))
+            {
+                // Razonamiento obligatorio + herramientas no admitidas en Chat Completions: sin salida con esta API.
+                throw new ConnectorException(
+                    $"El modelo «{model}» exige razonamiento y no admite herramientas en Chat Completions, que es la API que " +
+                    "usa hazme en este modo: actívala con `hazme -set openai.api responses` (o `auto`). " +
+                    "Detalle del servicio: " + e2.Message);
+            }
         }
         using var respGuard = resp;
 

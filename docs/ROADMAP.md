@@ -5,39 +5,31 @@ el contexto técnico, en [AGENTS.md](../AGENTS.md).
 
 ## OpenAI: API Responses (`/v1/responses`)
 
-**Estado:** evaluado, decidido no hacerlo todavía.
+**Estado:** implementada (`openai.api` = `chat` | `responses` | `auto`, por defecto `chat`); **pendiente de validar contra
+el servicio real**. Se probó solo con un servidor simulado.
 
-**Por qué interesa**
-- Los modelos de razonamiento como `gpt-6.1-sol` no admiten herramientas con razonamiento en `/v1/chat/completions`.
-  Hoy hazme reintenta con `reasoning_effort=none` (o `openai.reasoning-effort`), así que **razona menos justo donde
-  más importa**: decidir qué comando es de solo lectura, qué es destructivo y qué plan proponer.
-- Responses permite razonamiento y herramientas a la vez. OpenAI indica mejor resultado con modelos de razonamiento
-  (cifra suya, ~3 % en SWE-bench) y menos tokens y más caché al reutilizar el razonamiento entre llamadas a herramientas.
-- **Privacidad:** con `store:false` e `include:["reasoning.encrypted_content"]` el servicio no retiene la conversación y el
-  razonamiento viaja cifrado en nuestras propias peticiones (modo sin estado / retención cero).
-- Las barreras reales (plan, tiempo de gracia, diffs, permisos) siguen siendo las de hazme: razonar mejor reduce errores,
-  no sustituye esas barreras.
+**Por qué:** `gpt-6.1-sol` exige razonamiento y no admite herramientas en Chat Completions (con `reasoning_effort=none` da
+400), y los modelos codex (`gpt-5.3-codex`) responden 404 en `/v1/chat/completions`. Sin Responses no se pueden usar con hazme.
 
-**Diseño previsto**
-- Cliente nuevo `OpenAiResponsesChat` (`IChatClient`) junto al de Chat Completions. Responses no admite mensajes
-  `role:"tool"`: el historial pasa a elementos `message`, `reasoning`, `function_call` y `function_call_output`.
-- Encaja con la arquitectura actual: `ChatMessage.RawContentJson` guardaría los elementos de salida del turno (incluido el
-  razonamiento cifrado) y se reenviarían tal cual, como ya se hace con Claude y Gemini.
-- Mantener: aviso de salida cortada (`incomplete`), validación de argumentos inválidos (`ToolCall.Create`) y diagnósticos a la IA.
-- Clave nueva `openai.api` = `auto` | `chat` | `responses`. En `auto`, Responses solo si la `base-url` es la de OpenAI;
-  Groq, Ollama, Mistral y demás compatibles siguen con Chat Completions (no todos implementan Responses).
-- Enviar `reasoning` solo si hay `openai.reasoning-effort`, y `include` de razonamiento cifrado solo cuando proceda,
-  con reintento sin él (modelos sin razonamiento como `gpt-4.1-mini` podrían rechazarlo: **por verificar**).
-- Tamaño estimado: 250-300 líneas.
+**Cómo está hecha** (`Hazme/Chat/OpenAiResponsesChat.cs`, `OpenAiAutoChat.cs`)
+- Sin estado en el servidor: `store:false` e `include:["reasoning.encrypted_content"]`; el razonamiento viaja cifrado en
+  nuestras peticiones. Los elementos del turno se guardan saneados (sin `id` ni `status`) en `RawContentJson` y se reenvían tal cual.
+- Herramientas con `strict:false` (en Responses las funciones son estrictas por defecto y las nuestras tienen campos opcionales).
+- `auto`: Chat Completions y, si el servicio dice que ese modelo solo funciona con `/v1/responses`, cambia el resto de la
+  sesión (solo antes de la primera respuesta del asistente, porque el formato del historial difiere).
+- `reasoning` solo se envía con `openai.reasoning-effort`; si el servicio rechaza el razonamiento cifrado, se reintenta sin él.
+- No se envía `max_output_tokens` (los tokens de razonamiento cuentan y cada modelo tiene su tope).
 
-**Riesgos / por verificar**
-- Comprobar en la documentación oficial los nombres exactos de los eventos de streaming (texto, argumentos de función,
-  finalización) antes de escribir el código.
-- Solo se puede probar con un servidor simulado; hace falta una prueba real contra OpenAI con una tarea inocua.
-- El razonamiento se factura como salida y tarda más; `openai.reasoning-effort` permite acotarlo.
+**Por validar con la API real**
+- Que reenviar el razonamiento sin `id` es aceptado con `store:false` (se basa en cómo lo hacen otros clientes sin estado).
+- Los nombres de los eventos de streaming usados (`response.output_text.delta`, `response.output_item.done`,
+  `response.completed`/`incomplete`/`failed`, `error`) y `incomplete_details.reason`.
+- Modelos sin razonamiento (`gpt-4.1-mini`) con `include`: debería reintentar sin él, pero no está comprobado.
 
-**Mejora rápida independiente:** enviar `store:false` en la ruta actual de Chat Completions, solo a `api.openai.com`
-(los servicios compatibles podrían rechazar el campo).
+**Pendiente**
+- `como` (el oráculo) sigue usando solo Chat Completions: con modelos que exigen Responses falla igual.
+- `auto` por URL: usar Responses por defecto solo si la `base-url` es la de OpenAI.
+- `store:false` también en la ruta de Chat Completions, solo hacia `api.openai.com`.
 
 ## Varios servidores: `hazme-agent` y `-peer`
 

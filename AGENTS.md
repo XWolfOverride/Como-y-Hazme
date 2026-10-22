@@ -69,6 +69,13 @@ docs/  .github/workflows/build.yml  build.sh  build.ps1  SECURITY.md
   Al retomar la IA recibe el diario como primer mensaje y **ningún plan queda aprobado**: debe verificar y replanificar.
 - Se desactiva con `-no-persist` o `persist-jobs false`.
 
+
+## OpenAI: tres clientes de chat (`openai.api`)
+
+`ChatClients.For` elige según `openai.api`: `chat` → `OpenAiChat` (Chat Completions, con reintento a `reasoning_effort=none`);
+`responses` → `OpenAiResponsesChat` (`/v1/responses`, sin estado: `store:false` + razonamiento cifrado; los elementos del turno
+se guardan saneados, sin ids, en `RawContentJson`); `auto` → `OpenAiAutoChat` (chat y cambia a responses si el servicio lo
+pide, solo antes de la primera respuesta del asistente: el formato del historial difiere). `como` solo usa Chat Completions.
 ## Agente remoto y peers (Hazme.Agent/ y Hazme/Peer/)
 
 Un solo `JobRunner` (un contexto) puede ejecutar en otras máquinas. **`hazme-agent`** es un **tercer ejecutable**

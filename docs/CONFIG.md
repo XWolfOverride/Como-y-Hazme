@@ -37,6 +37,22 @@ como -set connector openai
 - **Grok** (xAI) **no es** Groq: son servicios distintos, ambos accesibles con este conector.
 - URL y modelos de terceros los mantiene cada servicio: confírmalos en su documentación; no están todos probados.
 
+
+### API Chat Completions o Responses (`openai.api`)
+
+Por defecto `hazme` habla con OpenAI por **Chat Completions**. Algunos modelos solo funcionan con la API **Responses**
+(`/v1/responses`): los de razonamiento obligatorio como `gpt-6.1-sol` y los de la familia codex. Si ves un error que
+menciona `/v1/responses`, actívala tú:
+
+```console
+hazme -set openai.api responses     # siempre Responses (OpenAI; otros servicios pueden no implementarla)
+hazme -set openai.api auto          # Chat Completions y cambia sola a Responses si el servicio lo pide
+hazme -set openai.api chat          # (por defecto)
+```
+
+Con Responses no se guarda nada en el servidor (`store:false`) y el razonamiento del modelo viaja cifrado en tus
+propias peticiones. `openai.reasoning-effort` (`low`, `medium`, `high`...) ajusta cuánto razona. Solo afecta a `hazme`:
+`como` sigue usando Chat Completions.
 ## Opciones gratuitas
 
 Con **nivel gratuito, límites de uso y sin tarjeta**: **Google Gemini** (conector `gemini`, key en
@@ -60,7 +76,7 @@ coste despreciable. En Linux/macOS, permisos `600`. Protege de lecturas casuales
 | `Falta la clave 'gemini.api-key'` | Guarda la API key: `como -set gemini.api-key <clave>` |
 | `Error 401` | Clave incorrecta, caducada o incompleta: genera otra |
 | `Error 404` / *model not found* | Modelo inexistente: `como -models` y `como -set <conector>.model <modelo>` |
-| `Error 400: Function tools with reasoning_effort are not supported…` | Modelo de razonamiento de OpenAI sin soporte para herramientas con razonamiento en Chat Completions: hazme reintenta solo con `none`; fíjalo con `hazme -set openai.reasoning-effort none` (o `low`, `medium`... si tu modelo lo admite con herramientas) |
+| `Error 404: …not supported in the v1/chat/completions endpoint…` o `Error 400: Function tools with reasoning_effort…` | Ese modelo de OpenAI solo funciona con la API Responses: activa `hazme -set openai.api responses` (o `auto`: usa Chat Completions y cambia sola si el servicio lo pide). Si usas `chat`, hazme reintenta con `reasoning_effort=none` cuando el modelo lo admite |
 | `Error 429` | Límite de uso (típico en gratuitos). Se reintenta solo; si persiste, espera o cambia de conector |
 | `Error 503` / *high demand* | Servicio saturado: se reintenta con espera creciente; prueba más tarde |
 | `No se pudo conectar con el servicio de IA` | Sin red, proxy o `base-url` incorrecta: `como -get <conector>.base-url` |

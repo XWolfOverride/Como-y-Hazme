@@ -64,7 +64,12 @@ internal static class ChatClients
     {
         "claude" => new ClaudeChat(connector, settings),
         "gemini" => new GeminiChat(connector, settings),
-        "openai" => new OpenAiChat(connector, settings),
+        "openai" => ConnectorKeys.Resolve(connector, settings, "api") switch
+        {
+            "responses" => new OpenAiResponsesChat(connector, settings),
+            "auto" => new OpenAiAutoChat(connector, settings),
+            _ => new OpenAiChat(connector, settings),
+        },
         _ => throw new ConnectorException($"El conector '{connector.Id}' no está soportado por hazme."),
     };
 }
