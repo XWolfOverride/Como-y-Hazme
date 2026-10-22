@@ -142,7 +142,7 @@ internal sealed class Interaction
     }
 
     /// <summary>Lee una línea del usuario. Devuelve null si pulsa Esc, Ctrl-C o no hay entrada.</summary>
-    public string? ReadLine(bool escCancelsJob = true)
+    public string? ReadLine(bool escCancelsJob = true, bool mask = false)
     {
         if (!Interactive) return Console.ReadLine();
 
@@ -178,7 +178,7 @@ internal sealed class Interaction
 
             if (char.IsControl(k.KeyChar)) continue;
             sb.Append(k.KeyChar);
-            ConsoleUi.Write(k.KeyChar.ToString(), ConsoleColor.White);
+            ConsoleUi.Write(mask ? "*" : k.KeyChar.ToString(), ConsoleColor.White);
         }
     }
 }

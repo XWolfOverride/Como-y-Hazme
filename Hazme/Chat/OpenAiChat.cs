@@ -104,6 +104,7 @@ internal sealed class OpenAiChat(IAiConnector connector, ISettings settings) : I
 
         var text = new StringBuilder();
         var pending = new SortedDictionary<int, PendingCall>();
+        string? finishReason = null;
 
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
@@ -121,6 +122,8 @@ internal sealed class OpenAiChat(IAiConnector connector, ISettings settings) : I
                 throw new ConnectorException(HttpUtil.ExtractError(json) ?? "Error desconocido del servicio de IA");
 
             if (!root.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0) continue;
+            if (choices[0].TryGetProperty("finish_reason", out var fr) && fr.ValueKind == JsonValueKind.String)
+                finishReason = fr.GetString();
             if (!choices[0].TryGetProperty("delta", out var delta)) continue;
 
             if (delta.TryGetProperty("content", out var content)
@@ -156,7 +159,7 @@ internal sealed class OpenAiChat(IAiConnector connector, ISettings settings) : I
         foreach (var (index, p) in pending)
         {
             var id = p.Id.Length > 0 ? p.Id : $"call_{index}";
-            calls.Add(new ToolCall(id, p.Name, ValidObjectOrEmpty(p.Args.ToString())));
+            calls.Add(ToolCall.Create(id, p.Name, p.Args.ToString()));
         }
 
         // Mensaje completo del asistente para reenviarlo en el historial.
@@ -186,20 +189,13 @@ internal sealed class OpenAiChat(IAiConnector connector, ISettings settings) : I
             w.WriteEndObject();
         }
 
-        return new ChatTurn(text.ToString(), calls, Encoding.UTF8.GetString(raw.ToArray()));
-    }
-
-    private static string ValidObjectOrEmpty(string json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return "{}";
-        try
+        string? notice = finishReason switch
         {
-            using var d = JsonDocument.Parse(json);
-            return d.RootElement.ValueKind == JsonValueKind.Object ? json : "{}";
-        }
-        catch (JsonException)
-        {
-            return "{}";
-        }
+            "length" => "Your last response hit the output limit of the service and was cut off. Anything after the cut was lost: write less per response or in several steps.",
+            "content_filter" => "The service filtered your last response (finish_reason: content_filter).",
+            _ when text.Length == 0 && calls.Count == 0 => $"The service returned an empty response (finish_reason: {finishReason ?? "none"}).",
+            _ => null,
+        };
+        return new ChatTurn(text.ToString(), calls, Encoding.UTF8.GetString(raw.ToArray()), notice);
     }
 }

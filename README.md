@@ -135,6 +135,28 @@ plan), **nunca** el contenido de archivos ni la salida de comandos: la IA vuelve
 de nuevo el plan. El diario se **borra al terminar** el trabajo y caduca solo a las 4 h (`job-retention-hours`).
 `persist-jobs false` o `-no-persist` lo desactivan.
 
+### Trabajar en varios servidores a la vez (`-agent` / `-peer`)
+
+Un solo `hazme` (un solo contexto) puede ejecutar comandos también en otras máquinas, con los mismos controles
+(comando visible, tiempo de gracia, plan, Esc). En la otra máquina corre un **agente temporal**, sin IA ni claves:
+
+```console
+# En B (por ssh, p. ej.):                    # En A:
+$ hazme -agent                               $ ssh -L 7700:127.0.0.1:7700 usuario@B     # túnel (o -listen en la misma red)
+  Token: K7QM-2XPD-9TRB-...                  $ hazme -peer web2:127.0.0.1:7700 migra X de web2 a este servidor
+                                               Token de «web2» › ****
+```
+
+- El agente muestra un **token aleatorio de un solo uso** (140 bits): no se guarda ni viaja; el tráfico va **cifrado**.
+- **Una sola conexión** (el puerto se cierra al autenticarse). **3 tokens incorrectos y el agente se cierra.**
+- Es **efímero**: se cierra a los 10 min sin conexión, a los 30 min sin órdenes o a las 2 h en total (`-wait`, `-idle`, `-ttl`).
+  Si se pierde la conexión no se reconecta: arranca otro agente.
+- Escucha solo en `127.0.0.1` salvo que pases `-listen`. En la otra máquina ves cada comando que se ejecuta;
+  Ctrl-C la corta. Los comandos no reciben entrada de teclado allí. Los permisos son los del usuario que lo arranca.
+- La IA conoce las máquinas conectadas, debe indicar en cuál actúa y preguntar si no está claro. Por ahora los
+  archivos remotos se tocan con `run_command` (cat, tee...).
+- Sin terminal, el token puede pasarse en `HAZME_PEER_TOKEN_<ID>`.
+
 ### Instrucciones permanentes
 
 Lo que escribas en `~/.como/AGENTS.md` y/o `~/AGENTS.md` se envía a la IA en cada trabajo de `hazme` (preferencias,

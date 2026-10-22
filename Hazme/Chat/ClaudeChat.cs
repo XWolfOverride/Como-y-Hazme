@@ -115,6 +115,7 @@ internal sealed class ClaudeChat(IAiConnector connector, ISettings settings) : I
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
         var done = false;
+        string? stopReason = null;
         while (!done && await reader.ReadLineAsync(ct) is { } line)
         {
             if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
@@ -153,6 +154,10 @@ internal sealed class ClaudeChat(IAiConnector connector, ISettings settings) : I
                 }
                 case "error":
                     throw new ConnectorException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del servicio de IA");
+                case "message_delta":
+                    if (root.TryGetProperty("delta", out var md) && md.TryGetProperty("stop_reason", out var sr) && sr.GetString() is { } reason)
+                        stopReason = reason;
+                    break;
                 case "message_stop":
                     done = true;
                     break;
@@ -179,8 +184,9 @@ internal sealed class ClaudeChat(IAiConnector connector, ISettings settings) : I
                 }
                 else if (b.Type == "tool_use")
                 {
-                    var args = ValidObjectOrEmpty(b.Data.ToString());
-                    calls.Add(new ToolCall(b.Id ?? "", b.Name ?? "", args));
+                    var call = ToolCall.Create(b.Id ?? "", b.Name ?? "", b.Data.ToString());
+                    var args = call.ArgumentsJson;
+                    calls.Add(call);
                     w.WriteStartObject();
                     w.WriteString("type", "tool_use");
                     w.WriteString("id", b.Id);
@@ -200,20 +206,13 @@ internal sealed class ClaudeChat(IAiConnector connector, ISettings settings) : I
             w.WriteEndArray();
         }
 
-        return new ChatTurn(fullText.ToString(), calls, Encoding.UTF8.GetString(raw.ToArray()));
-    }
-
-    private static string ValidObjectOrEmpty(string json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return "{}";
-        try
+        string? notice = stopReason switch
         {
-            using var d = JsonDocument.Parse(json);
-            return d.RootElement.ValueKind == JsonValueKind.Object ? json : "{}";
-        }
-        catch (JsonException)
-        {
-            return "{}";
-        }
+            "max_tokens" => $"Your last response hit the output limit ({maxTokens} tokens) and was cut off. Anything after the cut was lost: write less per response or in several steps.",
+            "refusal" => "The service refused to continue with your last response (stop_reason: refusal).",
+            _ when fullText.Length == 0 && calls.Count == 0 => $"The service returned an empty response (stop_reason: {stopReason ?? "none"}).",
+            _ => null,
+        };
+        return new ChatTurn(fullText.ToString(), calls, Encoding.UTF8.GetString(raw.ToArray()), notice);
     }
 }

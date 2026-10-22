@@ -15,6 +15,8 @@ const string Usage = """
       hazme -jobs                 Lista los trabajos interrumpidos que se pueden retomar
       hazme -resume [id] [texto]  Retoma un trabajo (el más reciente por defecto), con instrucciones opcionales
       hazme -discard <id|all>     Borra trabajos interrumpidos
+      hazme -agent [opciones]     Ejecutor remoto TEMPORAL para el hazme de otra máquina (una sola conexión).
+                                  Opciones: -port N (7700) -listen IP (127.0.0.1) -wait MIN (10) -idle MIN (30) -ttl MIN (120)
 
     Opciones (en cualquier posición):
       -no-color                   Desactiva los colores en esta llamada
@@ -22,6 +24,7 @@ const string Usage = """
       -confirm                    Confirma con diff TODA escritura de archivos en esta llamada
       -no-plan                    Sin plan previo: la IA actúa directamente en esta llamada
       -less-safe                  MODO MENOS SEGURO en esta llamada: lee archivos privados sin preguntar
+      -peer id:host:puerto        Trabaja también en otra máquina con un agente en marcha (repetible); pide su token
       -no-persist                 No guarda el diario del trabajo en esta llamada (no podrá retomarse)
       -y                          Desatendido: no pide confirmaciones (plan, diffs); mantiene los
                                   tiempos de gracia de los comandos y no deja la conversación abierta
@@ -54,6 +57,7 @@ Console.OutputEncoding = new UTF8Encoding(false);
 
 using var job = new CancellationTokenSource();
 var shell = default(ShellRunner);
+using var peers = new Hazme.Peer.PeerSet();
 JobLog? log = null;
 var retentionHours = 4;
 
@@ -65,11 +69,37 @@ try
     var yesFlag = args.Contains("-y");
     var lessSafeFlag = args.Contains("-less-safe");
     var noPersistFlag = args.Contains("-no-persist");
+
+    // -peer id:host:puerto (repetible) también puede ir en cualquier posición.
+    var peerSpecs = new List<string>();
+    var rest = new List<string>();
+    for (var i = 0; i < args.Length; i++)
+    {
+        if (args[i] != "-peer")
+        {
+            rest.Add(args[i]);
+            continue;
+        }
+        if (i + 1 >= args.Length)
+        {
+            ConsoleUi.Error("Uso: -peer id:host:puerto");
+            return 1;
+        }
+        peerSpecs.Add(args[++i]);
+    }
+
     if (!CliCommon.TryParse(
-            args.Where(a => a is not ("-confirm" or "-no-plan" or "-y" or "-less-safe" or "-no-persist")).ToArray(),
+            rest.Where(a => a is not ("-confirm" or "-no-plan" or "-y" or "-less-safe" or "-no-persist")).ToArray(),
             out var options))
         return 1;
     var verb = options.Command.FirstOrDefault();
+
+    // El agente remoto no usa IA ni configuración: arranca y se queda esperando una conexión.
+    if (verb == "-agent")
+    {
+        ConsoleUi.NoColor = options.NoColor;
+        return await Hazme.Peer.AgentServer.RunAsync(options.Command);
+    }
 
     // Sin tarea y con terminal, hazme pide la primera tarea; sin terminal no hay a quién preguntar.
     var askTask = options.Command.Length == 0 && !Console.IsInputRedirected;
@@ -103,7 +133,7 @@ try
     Console.CancelKeyPress += (_, e) =>
     {
         e.Cancel = true;
-        if (!shell.HandleCtrlC()) job.Cancel();
+        if (!shell.HandleCtrlC() && !peers.HandleCtrlC()) job.Cancel();
     };
 
     // Los riesgos de hazme se aceptan una vez, de forma explícita, antes de su primer uso.
@@ -125,6 +155,29 @@ try
 
     if (interaction.Interactive && !Console.IsOutputRedirected)
         ConsoleUi.WriteLine("Esc: abortar · escribe + Enter: nota para la IA · Ctrl-C: interrumpir comando", ConsoleColor.DarkGray);
+
+    // Peers: el token se pide por teclado (o en HAZME_PEER_TOKEN_<ID> sin terminal) y nunca se guarda.
+    foreach (var text in peerSpecs)
+    {
+        var spec = Hazme.Peer.PeerSpec.Parse(text);
+        if (peers.Has(spec.Id))
+        {
+            ConsoleUi.Error($"El peer «{spec.Id}» está repetido.");
+            return 1;
+        }
+        var token = ReadPeerToken(spec, interaction);
+        if (token is null)
+        {
+            ConsoleUi.Error($"Token de «{spec.Id}» ausente o con formato no válido.");
+            return 1;
+        }
+        ConsoleUi.Write($"Conectando con {spec.Id} ({spec.Host}:{spec.Port})… ", ConsoleColor.Gray);
+        var peer = await Hazme.Peer.PeerClient.ConnectAsync(spec, token, job.Token);
+        peers.Add(peer);
+        ConsoleUi.WriteLine($"✔ {peer.Info.Machine} · {peer.Info.Os} · usuario {peer.Info.User}", ConsoleColor.Green);
+        if (peer.Info.IsRoot)
+            ConsoleUi.WriteLine($"  ⚠ «{spec.Id}» corre como root: la IA tendrá permisos de root allí.", ConsoleColor.Red, error: true);
+    }
 
     var persist = !noPersistFlag && KnownKeys.Value(store, HazmeKeys.PersistJobs) != "false";
     var command = options.Command;
@@ -201,7 +254,7 @@ try
         var chat = Hazme.Chat.ChatClients.For(connector, store);
         var planRequired = !noPlanFlag && KnownKeys.Value(store, HazmeKeys.Plan) != "false";
 
-        return await new JobRunner(chat, store, interaction, shell, confirmAll, planRequired, yesFlag, lessSafe, log, job.Token)
+        return await new JobRunner(chat, store, interaction, shell, peers, confirmAll, planRequired, yesFlag, lessSafe, log, job.Token)
             .RunAsync(task, firstPrompt);
     }
     finally
@@ -209,7 +262,7 @@ try
         interaction.Stop();
     }
 }
-catch (Exception e) when (e is SettingsException or ConnectorException)
+catch (Exception e) when (e is SettingsException or ConnectorException or Hazme.Peer.PeerException)
 {
     ConsoleUi.Error(e.Message);
     log?.PrintResumeHint(retentionHours);
@@ -221,6 +274,18 @@ catch (OperationCanceledException)
     ConsoleUi.WriteLine("✖ Trabajo abortado.", ConsoleColor.Red);
     log?.PrintResumeHint(retentionHours);
     return 130;
+}
+
+static string? ReadPeerToken(Hazme.Peer.PeerSpec spec, Interaction interaction)
+{
+    var raw = Environment.GetEnvironmentVariable("HAZME_PEER_TOKEN_" + spec.Id.ToUpperInvariant().Replace('-', '_'));
+    if (raw is null)
+    {
+        if (!interaction.Interactive) return null;
+        ConsoleUi.Write($"Token de «{spec.Id}» ({spec.Host}:{spec.Port}) › ", ConsoleColor.White);
+        raw = interaction.ReadLine(escCancelsJob: false, mask: true);
+    }
+    return Hazme.Peer.PeerToken.Normalize(raw);
 }
 
 static string Short(string text)

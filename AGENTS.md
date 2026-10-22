@@ -68,6 +68,31 @@ docs/  .github/workflows/build.yml  build.sh  build.ps1  SECURITY.md
   Al retomar la IA recibe el diario como primer mensaje y **ningún plan queda aprobado**: debe verificar y replanificar.
 - Se desactiva con `-no-persist` o `persist-jobs false`.
 
+## Agente remoto y peers (Hazme/Peer/)
+
+Un solo `JobRunner` (un contexto) puede ejecutar en otras máquinas. `hazme -agent` (AgentServer.cs) es un ejecutor
+efímero **sin IA ni config** (`NoSettings`, `ShellRunner(noStdin: true)`); `-peer id:host:puerto` (PeerClient.cs/PeerSet)
+conecta a él. Las reglas (plan, diff, tiempo de gracia, privacidad) las aplica **A**; **B solo muestra y obedece**.
+- Seguridad (PeerCrypto.cs): token Crockford base32 de 140 bits generado en B; handshake HMAC mutuo (el cliente envía SIEMPRE
+  su prueba antes de verificar la del agente, para que un token malo cuente); claves HKDF por dirección; tramas AES-GCM con
+  contador implícito. Una sola conexión (se cierra el listener), 3 tokens malos = agente cerrado, esperas `-wait/-idle/-ttl`.
+- La herramienta `run_command` gana `host` solo si hay peers (se inyecta en `RunAsync`); el resto de herramientas con
+  `host` ≠ local devuelven error (fase 2 pendiente: archivos remotos, reglas de rutas por host, `-agent -confirm`).
+- Ctrl-C / Esc en A mandan `cancel` al agente, que mata el árbol de procesos (`ShellRunner.Kill`).
+- No se reconecta tras perder la conexión: error claro a la IA y a `Diagnose`.
+
+## Errores internos hacia la IA
+
+Todo fallo de una utilidad interna debe llegar a la IA con detalle diagnóstico (tipo de excepción, mensaje, HRESULT,
+campos recibidos, shell y directorio...), pero **no se muestra al usuario de primeras**:
+- Resultados de herramienta con `IsError` (`Fail`, `Describe`, `Missing`); una excepción inesperada en una herramienta
+  no tumba el trabajo (`ExecuteAsync`).
+- Problemas fuera de una herramienta (salida cortada por límite, respuesta vacía/bloqueada, fallo al guardar el diario)
+  van a `Diagnose(...)` y se entregan una vez como `[Diagnóstico interno de hazme ...]` en el siguiente mensaje.
+- `ChatTurn.Notice` lo rellenan los clientes (`stop_reason`/`finish_reason`/`finishReason`). `ToolCall.Create` marca
+  argumentos truncados o inválidos en vez de convertirlos en `{}` en silencio.
+- Al añadir una utilidad nueva, no traguen excepciones: devuelve el detalle con `Describe`.
+
 ## Instrucciones de usuario
 
 `FileTools.LoadUserInstructions` añade al system prompt el contenido de `~/.como/AGENTS.md` y `~/AGENTS.md`

@@ -150,6 +150,7 @@ internal sealed class JobLog
     private readonly JobRecord? _rec;
     private bool _finished;
     private bool _warned;
+    private string? _problem;
 
     private JobLog(JobRecord? rec) => _rec = rec;
 
@@ -173,6 +174,14 @@ internal sealed class JobLog
     public static JobLog Resume(JobRecord rec) => new(rec);
 
     public string? Id => _rec?.Id;
+
+    /// <summary>Problema de guardado pendiente de comunicar a la IA (se entrega una sola vez).</summary>
+    public string? TakeProblem()
+    {
+        var p = _problem;
+        _problem = null;
+        return p;
+    }
 
     /// <summary>Hay un trabajo guardado que se puede retomar.</summary>
     public bool Resumable => _rec is not null && !_finished;
@@ -264,6 +273,7 @@ internal sealed class JobLog
             // Que no se pueda guardar el diario no debe romper el trabajo; se avisa una vez.
             if (_warned) return;
             _warned = true;
+            _problem = $"Saving the job log failed ({e.GetType().Name}: {e.Message}); the job cannot be resumed if it gets interrupted.";
             ConsoleUi.WriteLine("⚠ No se pudo guardar el diario del trabajo; no podrá retomarse si se interrumpe.",
                 ConsoleColor.Yellow, error: true);
         }

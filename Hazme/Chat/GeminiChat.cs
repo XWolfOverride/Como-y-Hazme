@@ -114,6 +114,7 @@ internal sealed class GeminiChat(IAiConnector connector, ISettings settings) : I
         var pendingText = new StringBuilder();
         var rawParts = new List<string>();
         var calls = new List<ToolCall>();
+        string? finishReason = null;
 
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
@@ -128,6 +129,8 @@ internal sealed class GeminiChat(IAiConnector connector, ISettings settings) : I
                 throw new ConnectorException(HttpUtil.ExtractError(line.Substring(5)) ?? "Error desconocido del servicio de IA");
 
             if (!root.TryGetProperty("candidates", out var cands) || cands.GetArrayLength() == 0) continue;
+            if (cands[0].TryGetProperty("finishReason", out var fr) && fr.ValueKind == JsonValueKind.String)
+                finishReason = fr.GetString();
             if (!cands[0].TryGetProperty("content", out var content)
                 || !content.TryGetProperty("parts", out var parts)) continue;
 
@@ -164,7 +167,13 @@ internal sealed class GeminiChat(IAiConnector connector, ISettings settings) : I
         if (pendingText.Length > 0) rawParts.Add(TextPart(pendingText.ToString()));
         if (rawParts.Count == 0) rawParts.Add(TextPart("(sin respuesta)"));
 
-        return new ChatTurn(fullText.ToString(), calls, "[" + string.Join(",", rawParts) + "]");
+        string? notice = finishReason switch
+        {
+            "MAX_TOKENS" => "Your last response hit the output limit and was cut off. Anything after the cut was lost: write less per response or in several steps.",
+            null or "STOP" => fullText.Length == 0 && calls.Count == 0 ? "The service returned an empty response." : null,
+            _ => $"The service ended your last response abnormally (finishReason: {finishReason}).",
+        };
+        return new ChatTurn(fullText.ToString(), calls, "[" + string.Join(",", rawParts) + "]", notice);
     }
 
     private static string TextPart(string text)

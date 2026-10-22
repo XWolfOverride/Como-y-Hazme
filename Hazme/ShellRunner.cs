@@ -6,13 +6,14 @@ using Como.Settings;
 
 namespace Hazme;
 
-internal sealed record ShellResult(int ExitCode, string Stdout, string Stderr, bool Interrupted, string? StartError = null);
+internal sealed record ShellResult(
+    int ExitCode, string Stdout, string Stderr, bool Interrupted, string? StartError = null, string? Warning = null);
 
 /// <summary>
 /// Lanza comandos en el shell del sistema. El comando hereda la entrada del terminal (puede ser
 /// interactivo); stdout/stderr se muestran en vivo y se capturan (truncados) para la IA.
 /// </summary>
-internal sealed class ShellRunner(ISettings settings)
+internal sealed class ShellRunner(ISettings settings, bool noStdin = false)
 {
     private readonly object _lock = new();
     private Process? _running;
@@ -35,13 +36,29 @@ internal sealed class ShellRunner(ISettings settings)
         }
     }
 
-    public async Task<ShellResult> RunAsync(string command, string? cwd)
+    /// <summary>
+    /// <paramref name="onOutput"/> recibe la salida en vivo (texto, esEstándarError); sin él se escribe en la consola.
+    /// </summary>
+    /// <summary>Mata ya el árbol de procesos del comando en curso (cancelación remota). False si no hay ninguno.</summary>
+    public bool Kill()
+    {
+        lock (_lock)
+        {
+            if (_running is null) return false;
+            _ctrlCs = Math.Max(_ctrlCs, 2);
+            try { _running.Kill(entireProcessTree: true); } catch { /* ya terminó */ }
+            return true;
+        }
+    }
+
+    public async Task<ShellResult> RunAsync(string command, string? cwd, Action<string, bool>? onOutput = null)
     {
         var psi = new ProcessStartInfo
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = noStdin,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
             WorkingDirectory = string.IsNullOrWhiteSpace(cwd) ? Environment.CurrentDirectory : cwd,
@@ -82,23 +99,31 @@ internal sealed class ShellRunner(ISettings settings)
                 _running = p;
                 _ctrlCs = 0;
             }
+            // Sin nadie en el terminal (agente remoto): el comando recibe fin de entrada en vez de quedarse esperando.
+            if (noStdin) p.StandardInput.Close();
         }
         catch (Exception e) when (e is Win32Exception or InvalidOperationException or DirectoryNotFoundException)
         {
-            return new ShellResult(-1, "", "", false, e.Message);
+            return new ShellResult(-1, "", "", false,
+                $"{e.GetType().Name}: {e.Message} (shell: {psi.FileName}, working directory: {psi.WorkingDirectory})");
         }
 
+        string? warning = null;
         var outCap = new Capture();
         var errCap = new Capture();
         var pumps = Task.WhenAll(
-            Pump(p.StandardOutput, outCap, ConsoleColor.Gray, error: false),
-            Pump(p.StandardError, errCap, ConsoleColor.DarkYellow, error: true));
+            Pump(p.StandardOutput, outCap, ConsoleColor.Gray, error: false, onOutput),
+            Pump(p.StandardError, errCap, ConsoleColor.DarkYellow, error: true, onOutput));
 
         try
         {
             await p.WaitForExitAsync();
             // Un nieto puede mantener abiertas las tuberías: no esperamos indefinidamente.
-            try { await pumps.WaitAsync(TimeSpan.FromSeconds(2)); } catch (TimeoutException) { }
+            try { await pumps.WaitAsync(TimeSpan.FromSeconds(2)); }
+            catch (TimeoutException)
+            {
+                warning = "The command ended but its output pipes stayed open for more than 2 s (a background child process still holds them); the captured stdout/stderr may be incomplete.";
+            }
         }
         finally
         {
@@ -108,17 +133,20 @@ internal sealed class ShellRunner(ISettings settings)
         var interrupted = _ctrlCs > 0;
         var exit = p.ExitCode;
         p.Dispose();
-        return new ShellResult(exit, outCap.ToString(), errCap.ToString(), interrupted);
+        return new ShellResult(exit, outCap.ToString(), errCap.ToString(), interrupted, Warning: warning);
     }
 
-    private static async Task Pump(StreamReader reader, Capture capture, ConsoleColor color, bool error)
+    private static async Task Pump(
+        StreamReader reader, Capture capture, ConsoleColor color, bool error, Action<string, bool>? onOutput)
     {
         var buf = new char[4096];
         int n;
         while ((n = await reader.ReadAsync(buf)) > 0)
         {
             capture.Append(buf.AsSpan(0, n));
-            ConsoleUi.Write(new string(buf, 0, n), color, error);
+            var chunk = new string(buf, 0, n);
+            if (onOutput is null) ConsoleUi.Write(chunk, color, error);
+            else onOutput(chunk, error);
         }
     }
 
