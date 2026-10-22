@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Como;
 using Como.Connectors;
 using Como.Settings;
 
@@ -12,6 +13,9 @@ namespace Hazme.Chat;
 /// </summary>
 internal sealed class OpenAiChat(IAiConnector connector, ISettings settings) : IChatClient
 {
+    // Tras un rechazo por razonamiento+herramientas, el resto de la sesión ya va con "none".
+    private static string? s_effortFallback;
+
     private sealed class PendingCall
     {
         public string Id = "";
@@ -90,17 +94,42 @@ internal sealed class OpenAiChat(IAiConnector connector, ISettings settings) : I
             w.WriteEndObject();
         }
 
-        var payload = body.ToArray();
-        using var resp = await HttpUtil.SendAsync(() =>
+        var basePayload = body.ToArray();
+
+        Task<HttpResponseMessage> Send(string? effort)
         {
-            var req = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/chat/completions")
+            var payload = effort is { Length: > 0 } ? WithReasoningEffort(basePayload, effort) : basePayload;
+            return HttpUtil.SendAsync(() =>
             {
-                Content = new ByteArrayContent(payload)
-            };
-            req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            return req;
-        }, ct);
+                var req = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/chat/completions")
+                {
+                    Content = new ByteArrayContent(payload)
+                };
+                req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                return req;
+            }, ct);
+        }
+
+        // Clave "reasoning-effort" (o, si el servicio ya rechazó el razonamiento con herramientas, "none").
+        var effort = s_effortFallback ?? ConnectorKeys.Resolve(connector, settings, "reasoning-effort");
+        HttpResponseMessage resp;
+        try
+        {
+            resp = await Send(effort);
+        }
+        catch (ConnectorException e) when (effort != "none"
+                                           && e.Message.Contains("reasoning_effort", StringComparison.OrdinalIgnoreCase)
+                                           && e.Message.Contains("none", StringComparison.OrdinalIgnoreCase))
+        {
+            // Algunos modelos de razonamiento no admiten herramientas con razonamiento en Chat Completions.
+            ConsoleUi.WriteLine(
+                "⚠ El modelo no admite razonamiento con herramientas en Chat Completions: se usa reasoning_effort=none " +
+                "(fíjalo con `-set openai.reasoning-effort none` para no ver este aviso).", ConsoleColor.Yellow, error: true);
+            s_effortFallback = "none";
+            resp = await Send("none");
+        }
+        using var respGuard = resp;
 
         var text = new StringBuilder();
         var pending = new SortedDictionary<int, PendingCall>();
@@ -197,5 +226,12 @@ internal sealed class OpenAiChat(IAiConnector connector, ISettings settings) : I
             _ => null,
         };
         return new ChatTurn(text.ToString(), calls, Encoding.UTF8.GetString(raw.ToArray()), notice);
+    }
+
+    /// <summary>Inserta "reasoning_effort" como primer campo del objeto JSON ya serializado.</summary>
+    private static byte[] WithReasoningEffort(byte[] json, string effort)
+    {
+        var field = Encoding.UTF8.GetBytes($"{{\"reasoning_effort\":\"{JsonEncodedText.Encode(effort)}\",");
+        return [.. field, .. json.AsSpan(1)];
     }
 }

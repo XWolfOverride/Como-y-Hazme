@@ -133,4 +133,6 @@ dotnet run --project Hazme -- <tarea>          # o Como
 dotnet publish Hazme -c Release -r win-x64     # NativeAOT: requiere compilador nativo (ver docs/BUILD.md)
 ```
 
+Pendiente y decisiones aparcadas: [docs/ROADMAP.md](docs/ROADMAP.md).
+
 Rama de trabajo: `master`; rama principal para PRs: `main`.

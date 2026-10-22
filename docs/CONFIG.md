@@ -60,6 +60,7 @@ coste despreciable. En Linux/macOS, permisos `600`. Protege de lecturas casuales
 | `Falta la clave 'gemini.api-key'` | Guarda la API key: `como -set gemini.api-key <clave>` |
 | `Error 401` | Clave incorrecta, caducada o incompleta: genera otra |
 | `Error 404` / *model not found* | Modelo inexistente: `como -models` y `como -set <conector>.model <modelo>` |
+| `Error 400: Function tools with reasoning_effort are not supported…` | Modelo de razonamiento de OpenAI sin soporte para herramientas con razonamiento en Chat Completions: hazme reintenta solo con `none`; fíjalo con `hazme -set openai.reasoning-effort none` (o `low`, `medium`... si tu modelo lo admite con herramientas) |
 | `Error 429` | Límite de uso (típico en gratuitos). Se reintenta solo; si persiste, espera o cambia de conector |
 | `Error 503` / *high demand* | Servicio saturado: se reintenta con espera creciente; prueba más tarde |
 | `No se pudo conectar con el servicio de IA` | Sin red, proxy o `base-url` incorrecta: `como -get <conector>.base-url` |

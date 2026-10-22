@@ -15,6 +15,7 @@ public abstract class OpenAiCompatibleConnector : IAiConnector
     private readonly ConfigKey _apiKey;
     private readonly ConfigKey _model;
     private readonly ConfigKey _baseUrl;
+    private readonly ConfigKey _reasoning;
 
     protected OpenAiCompatibleConnector(
         string id, string vendor, string defaultBaseUrl, string defaultModel, string apiKeyEnvVar)
@@ -23,7 +24,10 @@ public abstract class OpenAiCompatibleConnector : IAiConnector
         _apiKey = new ConfigKey("api-key", $"API key de {vendor}", Secret: true, EnvVar: apiKeyEnvVar);
         _model = new ConfigKey("model", "Modelo a usar", Default: defaultModel);
         _baseUrl = new ConfigKey("base-url", "URL base de la API (incluye /v1)", Default: defaultBaseUrl);
-        Keys = [_apiKey, _model, _baseUrl];
+        _reasoning = new ConfigKey("reasoning-effort",
+            "Esfuerzo de razonamiento que se envía (none, minimal, low, medium, high...); vacío = el del servicio",
+            Validate: v => v.All(c => char.IsAsciiLetterLower(c) || c == '-') ? null : "usa una palabra en minúsculas (p. ej. none, low, medium, high)");
+        Keys = [_apiKey, _model, _baseUrl, _reasoning];
     }
 
     public string Id { get; }
